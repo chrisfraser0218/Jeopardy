@@ -119,9 +119,9 @@ test('v1 database migration preserves existing definitions and media metadata',a
   try{
     const old=openStore(directory);const game=old.get(old.list()[0].id)!;
     old.db.prepare('INSERT INTO media VALUES (?, ?, ?, ?, ?, ?)').run('kept-media','image','kept.png','image/png',100,'kept.png');
-    old.db.exec('DROP TABLE live_session; PRAGMA user_version=1;');old.db.close();
+    old.db.exec('DROP TABLE session_players; DROP TABLE live_session; PRAGMA user_version=1;');old.db.close();
     const migrated=openStore(directory);
-    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,2);}
+    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,3);}
     finally{migrated.db.close();}
   }finally{await rm(directory,{recursive:true,force:true});}
 });

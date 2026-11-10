@@ -8,7 +8,7 @@ export function openStore(directory: string) {
   const db = new DatabaseSync(join(directory, 'games.sqlite'));
   db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
   const version = Number((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version);
-  if (version > 2) throw new Error('This database needs a newer app version.');
+  if (version > 3) throw new Error('This database needs a newer app version.');
   if (version < 1) db.exec(`BEGIN;
     CREATE TABLE games (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, updated_at TEXT NOT NULL, sample INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL);
     CREATE TABLE media (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, filename TEXT NOT NULL UNIQUE);
@@ -19,6 +19,9 @@ export function openStore(directory: string) {
   if (version < 2) db.exec(`BEGIN;
     CREATE TABLE live_session (slot INTEGER PRIMARY KEY CHECK(slot=1), state TEXT NOT NULL, host_token TEXT NOT NULL, commands TEXT NOT NULL);
     PRAGMA user_version=2; COMMIT;`);
+  if (version < 3) db.exec(`BEGIN;
+    CREATE TABLE session_players (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, name TEXT NOT NULL, name_key TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, removed INTEGER NOT NULL DEFAULT 0, UNIQUE(session_id, name_key));
+    PRAGMA user_version=3; COMMIT;`);
   function get(id:string): Game | undefined {
     const g = db.prepare('SELECT * FROM games WHERE id=?').get(id) as any;
     if (!g) return;

@@ -1,0 +1,66 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import jsQR from 'jsqr';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { tmpdir, networkInterfaces } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createApp } from '../server/app.js';
+
+test('QR decoding and independent phone buzzers: identity, racing, host corrections, reconnect, removal and expiry', {timeout:60000},async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'blueboard-phone-browser-'));
+  const {live,store,server}=createApp(directory);server.listen(0,'0.0.0.0');await once(server,'listening');
+  const port=(server.address() as {port:number}).port,root=`http://127.0.0.1:${port}`;
+  const lan=Object.values(networkInterfaces()).flat().find(i=>i?.family==='IPv4'&&!i.internal);
+  assert.ok(lan,'QR/browser verification requires an available non-loopback network address');
+  const networkRoot=`http://${lan.address}:${port}`;
+  live.start(store.list()[0].id);const setup=live.setup(port),sid=setup.session!.id;
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+  const board=await browser.newPage({viewport:{width:1440,height:1100}}),host=await browser.newPage({viewport:{width:820,height:1180}});
+  const aContext=await browser.newContext({viewport:{width:390,height:844}}),bContext=await browser.newContext({viewport:{width:390,height:844}}),cContext=await browser.newContext({viewport:{width:390,height:844}});
+  const alice=await aContext.newPage(),bob=await bContext.newPage(),eve=await cContext.newPage();
+  const errors:string[]=[];for(const page of [board,host,alice,bob,eve])page.on('pageerror',e=>errors.push(e.message));
+  const session=()=>live.publicState().session!;
+  try{
+    await board.goto(root+'/display');await host.goto(networkRoot+`/host#${setup.hostToken}`);
+    const qr=board.getByAltText('Player join QR code',{exact:true});await qr.waitFor();
+    await qr.evaluate((image:HTMLImageElement)=>image.decode());
+    const pixels=await qr.evaluate((image:HTMLImageElement)=>{const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;const context=canvas.getContext('2d')!;context.drawImage(image,0,0);return {data:Array.from(context.getImageData(0,0,canvas.width,canvas.height).data),width:canvas.width,height:canvas.height};});
+    const decoded=jsQR(new Uint8ClampedArray(pixels.data),pixels.width,pixels.height);assert.ok(decoded);assert.equal(decoded.data,`${networkRoot}/join/${sid}`);assert.notEqual(new URL(decoded.data).hostname,'localhost');assert.ok(!decoded.data.includes(setup.hostToken!));
+    await alice.goto(decoded.data);await bob.goto(decoded.data);await eve.goto(decoded.data);
+    assert.equal(await alice.evaluate(()=>isSecureContext),false,'phone runs on ordinary LAN HTTP');
+    await alice.getByLabel('Your name',{exact:true}).fill(' Alice ');await alice.getByRole('button',{name:'Join game',exact:true}).click();await alice.getByRole('heading',{name:'Waiting for a clue',exact:true}).waitFor();
+    await bob.getByLabel('Your name',{exact:true}).fill(' alice ');await bob.getByRole('button',{name:'Join game',exact:true}).click();await bob.getByRole('alert').filter({hasText:'already used'}).waitFor();
+    await bob.getByLabel('Your name',{exact:true}).fill('Bob');await bob.getByRole('button',{name:'Join game',exact:true}).click();await bob.getByRole('heading',{name:'Waiting for a clue',exact:true}).waitFor();
+    await eve.getByLabel('Your name',{exact:true}).fill('<b>Eve</b>');await eve.getByRole('button',{name:'Join game',exact:true}).click();await eve.getByRole('heading',{name:'Waiting for a clue',exact:true}).waitFor();assert.equal(await eve.locator('.player-name b').count(),0);assert.equal(await eve.locator('.player-name strong').textContent(),'<b>Eve</b>');
+    await host.getByRole('button',{name:'Close joining',exact:true}).click();await host.getByRole('button',{name:'Open joining',exact:true}).waitFor();
+    await alice.reload();await alice.getByRole('heading',{name:'Waiting for a clue',exact:true}).waitFor();assert.equal(await alice.locator('.player-name strong').textContent(),'Alice');
+    const observer=await aContext.newPage();await observer.goto(decoded.data);await observer.getByRole('heading',{name:'Another tab is your active buzzer',exact:true}).waitFor();assert.equal(await observer.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);
+    await host.getByRole('button',{name:'Select Kitchen science $200',exact:true}).click();await alice.getByRole('heading',{name:'Buzzing closed',exact:true}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);
+    await alice.getByRole('button',{name:'Buzz',exact:true}).dispatchEvent('click');assert.equal(session().buzzer.winnerId,null,'early scripted clicks do not queue attempts');
+    await host.getByRole('button',{name:'Hide player QR',exact:true}).click();await qr.waitFor({state:'hidden'});assert.equal(session().currentClueId,session().buzzer.clueId);
+    await host.getByRole('button',{name:'Show player QR',exact:true}).click();await qr.waitFor();await board.locator('.live-clue-text').waitFor();
+    await host.getByRole('button',{name:'Open buzzing',exact:true}).click();await alice.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();await bob.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();
+    await Promise.all([alice.getByRole('button',{name:'Buzz',exact:true}).click(),bob.getByRole('button',{name:'Buzz',exact:true}).click()]);
+    await host.locator('.buzz-winner').waitFor();const winnerName=live.publicState().players.find(p=>p.id===session().buzzer.winnerId)!.name;
+    const winner=winnerName==='Alice'?alice:bob,loser=winnerName==='Alice'?bob:alice;
+    await winner.getByRole('heading',{name:'You buzzed first',exact:true}).waitFor();await loser.getByRole('heading',{name:'Another player buzzed first',exact:true}).waitFor();assert.equal(await winner.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);assert.equal(await board.locator('.buzz-winner strong').innerText(),winnerName);
+    await mkdir('artifacts',{recursive:true});await winner.screenshot({path:'artifacts/player-first-buzz.png',fullPage:true});await board.screenshot({path:'artifacts/player-display-qr-winner.png',fullPage:true});
+    await host.getByRole('button',{name:'Clear accidental buzz & reopen',exact:true}).click();await winner.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();assert.equal(session().buzzer.excludedIds.length,0);await winner.getByRole('button',{name:'Buzz',exact:true}).click();await winner.getByRole('heading',{name:'You buzzed first',exact:true}).waitFor();
+    await host.getByRole('button',{name:'Exclude winner & reopen',exact:true}).click();await winner.getByRole('heading',{name:'Ineligible for this clue',exact:true}).waitFor();await loser.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();
+    await host.screenshot({path:'artifacts/player-host-controls.png',fullPage:true});await loser.screenshot({path:'artifacts/player-buzzer-open.png',fullPage:true});
+    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'Reset clue eligibility…',exact:true}).click();await winner.getByRole('heading',{name:'Buzzing closed',exact:true}).waitFor();assert.equal(session().buzzer.excludedIds.length,0);
+    await observer.close();
+    // Offline taps are disabled and never submitted when the phone reconnects.
+    await host.getByRole('button',{name:'Open buzzing',exact:true}).click();await alice.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();await aContext.setOffline(true);await alice.getByRole('heading',{name:/Disconnected|Reconnecting/}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);await alice.getByRole('button',{name:'Buzz',exact:true}).dispatchEvent('click');
+    await host.getByRole('button',{name:'Close buzzing',exact:true}).click();await host.getByRole('button',{name:'Open buzzing',exact:true}).click();await aContext.setOffline(false);await alice.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();assert.equal(session().buzzer.winnerId,null,'no buzz replayed after reconnect');
+    await host.getByRole('button',{name:'Reveal answer on display',exact:true}).click();await alice.getByRole('heading',{name:'Buzzing closed',exact:true}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);assert.equal(await alice.locator('.live-answer').count(),0);
+    host.once('dialog',d=>d.dismiss());await host.getByRole('button',{name:'Remove player Bob',exact:true}).click();assert.ok(live.publicState().players.some(p=>p.name==='Bob'));
+    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'Remove player Bob',exact:true}).click();await bob.getByRole('alert').filter({hasText:'removed'}).waitFor();assert.equal(await bob.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);await bob.reload();await bob.getByRole('alert').filter({hasText:'removed'}).waitFor();
+    assert.equal(await alice.evaluate(()=>document.body.scrollWidth<=innerWidth),true);assert.equal(await alice.locator('audio').count(),0);
+    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'End session',exact:true}).click();await alice.getByRole('alert').filter({hasText:'session ended'}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);
+    live.start(store.list()[0].id);await eve.reload();await eve.getByRole('alert').filter({hasText:/expired|ended/}).waitFor();assert.notEqual(session().id,sid);
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();await new Promise<void>(resolve=>live.io.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}
+});

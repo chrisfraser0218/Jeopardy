@@ -32,6 +32,8 @@ export function createApp(directory=resolve('data')) {
     if(!live.authorized(req.get('authorization')?.replace(/^Bearer /,'')))return res.status(401).json({error:'A valid private host link is required.'});
     res.json(live.hostState());
   });
+  app.post('/api/player/join',(req,res)=>res.status(201).json(live.players.join(req.body)));
+  app.get('/api/player/session/:id',(req,res)=>res.json(live.players.view(req.params.id)));
   app.use('/api/games',localOnly);
   app.post('/api/media',localOnly);
   app.get('/api/games',(_req,res)=>res.json(store.list()));
