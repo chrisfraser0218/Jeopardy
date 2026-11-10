@@ -1,0 +1,111 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import { mkdtemp, rm, mkdir, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createApp } from '../server/app.js';
+import { png, wav } from './fixtures.js';
+
+test('Chrome: library, editor, media, preview, unsaved warning, and responsive layout', {timeout:60000}, async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'blueboard-browser-'));
+  const {app,store}=createApp(directory);
+  const server=app.listen(0,'127.0.0.1');await once(server,'listening');
+  const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  let page=await browser.newPage({viewport:{width:1440,height:1050}});
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+  const external:string[]=[];page.on('request',r=>{if(!r.url().startsWith(url)&&!r.url().startsWith('data:'))external.push(r.url());});
+  async function waitSaved(){await page.waitForFunction(()=>document.querySelector('.save-status')?.textContent?.includes('✓ Saved'));}
+  try {
+    await mkdir('artifacts',{recursive:true});
+    await page.goto(url);await page.getByRole('heading',{name:'The curious collection'}).waitFor();
+    await page.screenshot({path:'artifacts/library.png',fullPage:true});
+    await page.getByRole('button',{name:'Create a game'}).click();
+    await page.getByLabel('Game title',{exact:true}).fill('Browser game');
+    await page.getByLabel('Description Optional').fill('A browser-verified draft');
+    await page.getByRole('button',{name:'Create game',exact:true}).click();
+    await page.getByLabel('Category 1 name').fill('Seeing and hearing');
+    await page.getByLabel('Clue value ($)').fill('350');
+    await page.getByLabel('Clue text Optional with media').fill('What do you notice?');
+    await page.getByLabel('Correct answer Hidden in preview').fill('A tiny image and a quiet sound');
+    await page.getByLabel('Add image',{exact:true}).setInputFiles({name:'picture.png',mimeType:'image/png',buffer:png});
+    await page.getByLabel('Replace image',{exact:true}).waitFor();
+    assert.equal(await page.locator('.attachment-image').evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0),true);
+    for (const [name,mimeType] of [['pixel.jpg','image/jpeg'],['pixel.webp','image/webp']]) {
+      const before=await page.locator('.attachment-image').getAttribute('src');
+      await page.getByLabel('Replace image',{exact:true}).setInputFiles({name,mimeType,buffer:await readFile(new URL('./fixtures/'+name,import.meta.url))});
+      await page.waitForFunction((old)=>{const img=document.querySelector('.attachment-image') as HTMLImageElement;return img?.getAttribute('src')!==old&&img.complete&&img.naturalWidth>0;},before);
+    }
+    await page.getByLabel('Add audio',{exact:true}).setInputFiles({name:'quiet.wav',mimeType:'audio/wav',buffer:wav()});
+    await page.getByLabel('Replace audio',{exact:true}).waitFor();
+    await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&a.readyState>=1;});
+    await page.getByLabel('Replace audio',{exact:true}).setInputFiles({name:'silence.mp3',mimeType:'audio/mpeg',buffer:await readFile(new URL('./fixtures/silence.mp3',import.meta.url))});
+    await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&a.readyState>=1;});
+    await page.locator('audio').evaluate(async(a:HTMLAudioElement)=>{await a.play();a.pause();});
+    assert.equal(await page.locator('audio').evaluate((a:HTMLAudioElement)=>a.paused),true);
+    await page.getByLabel('Replace audio',{exact:true}).setInputFiles({name:'quiet.wav',mimeType:'audio/wav',buffer:wav()});
+    await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&a.readyState>=1&&a.duration>1;});
+    await page.getByRole('button',{name:'Save game',exact:true}).click();await waitSaved();
+    await page.screenshot({path:'artifacts/editor.png',fullPage:true});
+    const savedImage=await page.locator('.attachment-image').getAttribute('src');
+    await page.getByRole('button',{name:'Preview clue'}).click();
+    await page.getByRole('dialog').waitFor();assert.equal(await page.locator('.answer').count(),0);
+    assert.equal(await page.locator('dialog audio').evaluate((a:HTMLAudioElement)=>a.paused),true);
+    await page.getByRole('button',{name:'Replay'}).last().click();
+    await page.locator('dialog audio').evaluate((a:HTMLAudioElement)=>a.pause());
+    assert.equal(await page.locator('dialog audio').evaluate((a:HTMLAudioElement)=>a.paused),true);
+    await page.getByRole('button',{name:'Reveal Answer'}).click();assert.equal(await page.locator('.answer').textContent(),'A tiny image and a quiet sound');
+    await page.screenshot({path:'artifacts/preview.png',fullPage:true});
+    await page.getByRole('button',{name:'Hide answer'}).click();assert.equal(await page.locator('.answer').count(),0);
+    await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});
+    await page.route('**/api/media/**',route=>route.fulfill({status:404,body:'Missing test attachment'}));
+    await page.getByRole('button',{name:'Preview clue'}).click();
+    await page.getByRole('dialog').getByRole('alert').filter({hasText:'image could not load'}).waitFor();
+    await page.getByRole('dialog').getByRole('alert').filter({hasText:'audio could not play'}).waitFor();
+    await page.keyboard.press('Escape');await page.unroute('**/api/media/**');
+    await page.getByLabel('Replace image',{exact:true}).setInputFiles({name:'replacement.png',mimeType:'image/png',buffer:png});
+    await page.waitForFunction((old)=>document.querySelector('.attachment-image')?.getAttribute('src')!==old,savedImage);
+    const replacement=await page.locator('.attachment-image').getAttribute('src');
+    // Cancel navigation first, then confirm discarding unsaved replacement.
+    page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'Game library'}).click();assert.equal(await page.getByLabel('Game description').count(),1);
+    page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Game library'}).click();
+    await page.locator('.game-card').filter({has:page.getByRole('heading',{name:'Browser game',exact:true})}).getByRole('button',{name:'Open editor'}).click();
+    assert.equal(await page.locator('.attachment-image').getAttribute('src'),savedImage);
+    await page.getByLabel('Replace image',{exact:true}).setInputFiles({name:'replacement2.png',mimeType:'image/png',buffer:png});
+    await page.waitForFunction((old)=>document.querySelector('.attachment-image')?.getAttribute('src')!==old,savedImage);
+    await page.getByRole('button',{name:'Save game',exact:true}).click();await waitSaved();
+    assert.notEqual(await page.locator('.attachment-image').getAttribute('src'),savedImage);assert.ok(replacement);
+    await page.locator('.media-box').nth(0).getByRole('button',{name:'Remove',exact:true}).click();
+    await page.locator('.media-box').nth(1).getByRole('button',{name:'Remove',exact:true}).click();
+    await page.getByRole('button',{name:'Save game',exact:true}).click();await waitSaved();
+    await page.getByLabel('Add image',{exact:true}).setInputFiles({name:'bad.png',mimeType:'image/png',buffer:Buffer.from('not an image')});
+    await page.getByRole('alert').filter({hasText:'whose content matches'}).waitFor();
+    await page.getByRole('button',{name:'Dismiss',exact:true}).click();
+    // A failed save leaves the draft intact and offers a retry.
+    await page.locator('#game-title').fill('');await page.getByRole('button',{name:'Save game',exact:true}).click();
+    await page.getByRole('alert').waitFor();assert.match(await page.locator('.save-status').innerText(),/Save failed/);
+    await page.locator('#game-title').fill('Browser game ');
+    await page.getByRole('button',{name:'Save game',exact:true}).click();await waitSaved();
+    // Browser's beforeunload protection is active for unsaved changes.
+    await page.getByLabel('Clue text Optional with media').fill('Unsaved edit');
+    let warning=false;page.once('dialog',async d=>{warning=d.type()==='beforeunload';await d.accept();});
+    await page.reload();await page.getByRole('heading',{name:'Your game library.'}).waitFor();assert.equal(warning,true);
+    await page.locator('.game-card').filter({has:page.getByRole('heading',{name:'Browser game',exact:true})}).getByRole('button',{name:'Open editor'}).click();
+    assert.equal(await page.getByLabel('Clue text Optional with media').inputValue(),'What do you notice?');
+    await page.close();
+    page=await browser.newPage({viewport:{width:390,height:844}});
+    page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(url);
+    await page.locator('.game-card').filter({has:page.getByRole('heading',{name:'Browser game',exact:true})}).getByRole('button',{name:'Open editor'}).click();
+    const dimensions=await page.evaluate(()=>({width:window.innerWidth,scroll:document.documentElement.scrollWidth}));
+    assert.ok(dimensions.scroll<=dimensions.width,`no page-wide horizontal overflow: ${JSON.stringify(dimensions)}`);
+    await page.screenshot({path:'artifacts/mobile-editor.png',fullPage:true});
+    await page.getByRole('button',{name:'Game library'}).click();
+    await page.getByRole('button',{name:'Delete Browser game',exact:true}).click();await page.getByRole('button',{name:'Keep game'}).click();
+    await page.getByRole('heading',{name:'Browser game',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Delete Browser game',exact:true}).click();await page.getByRole('button',{name:'Delete game',exact:true}).click();await page.getByRole('heading',{name:'Browser game',exact:true}).waitFor({state:'hidden'});
+    assert.deepEqual(errors,[]);assert.deepEqual(external,[],'all assets and requests stay local');
+  } finally {await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}
+});
