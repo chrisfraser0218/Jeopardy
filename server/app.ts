@@ -10,11 +10,11 @@ import { createServer } from 'node:http';
 import { attachLive } from './live.js';
 import { localOnly, localRequest, sameOrigin } from './access.js';
 
-export function createApp(directory=resolve('data')) {
+export function createApp(directory=resolve('data'), options:{now?:()=>number}={}) {
   const store=openStore(directory);
   const app=express();
   const server=createServer(app);
-  const live=attachLive(store,server);
+  const live=attachLive(store,server,options.now);
   app.disable('x-powered-by');
   app.use((_req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');next();});
   // Same-origin writes also block cross-site form submissions to this local service.
@@ -25,8 +25,8 @@ export function createApp(directory=resolve('data')) {
   });
   app.use(express.json({limit:'1mb'}));
   app.get('/api/live/setup',localOnly,(req,res)=>res.json(live.setup(req.socket.localPort!)));
-  app.post('/api/live/start',localOnly,(req,res)=>{const {gameId}=z.object({gameId:z.uuid()}).parse(req.body);live.start(gameId);res.status(201).json(live.setup(req.socket.localPort!));});
-  app.post('/api/live/end',localOnly,(_req,res)=>{live.endLocal();res.status(204).end();});
+  app.post('/api/live/start',localOnly,(req,res)=>{const {gameId,timerSeconds}=z.object({gameId:z.uuid(),timerSeconds:z.number().int().min(1).max(120).nullable().default(10)}).parse(req.body);live.start(gameId,timerSeconds);res.status(201).json(live.setup(req.socket.localPort!));});
+  app.post('/api/live/end',localOnly,(req,res)=>{if(!live.authorized(req.get('authorization')?.replace(/^Bearer /,'')))return res.status(401).json({error:'A valid host credential is required to end the game.'});live.endLocal();res.status(204).end();});
   app.get('/api/live',(_req,res)=>res.json(live.publicState()));
   app.get('/api/live/host',(req,res)=>{
     if(!live.authorized(req.get('authorization')?.replace(/^Bearer /,'')))return res.status(401).json({error:'A valid private host link is required.'});

@@ -45,8 +45,12 @@ test('independent board and host browsers synchronize, protect answers, control 
     await host.getByRole('status').filter({hasText:'Playback was blocked'}).waitFor();assert.equal(await host.getByRole('button',{name:'Play audio',exact:true}).isDisabled(),true);
     await board.locator('audio').evaluate((a:HTMLAudioElement)=>(a as any).restorePlay());
     await board.getByRole('button',{name:'Enable Audio',exact:true}).click();await board.getByText('Audio enabled on this display',{exact:true}).waitFor();
+    // Keep the play promise pending, then reject it after a newer pause command.
+    await board.locator('audio').evaluate((a:HTMLAudioElement)=>{const original=a.play.bind(a);(a as any).restoreDelayedPlay=()=>{a.play=original;};a.play=async()=>{await original();await new Promise<void>((_resolve,reject)=>{(a as any).rejectLatePlay=reject;});};});
     await host.getByRole('button',{name:'Play audio',exact:true}).click();await board.waitForFunction(()=>!document.querySelector('audio')!.paused);
     await host.getByRole('button',{name:'Pause audio',exact:true}).click();await board.waitForFunction(()=>document.querySelector('audio')!.paused);
+    await board.locator('audio').evaluate((a:HTMLAudioElement)=>{(a as any).rejectLatePlay(new Error('Late rejection after intentional pause'));(a as any).restoreDelayedPlay();});
+    await host.getByRole('status').filter({hasText:'Ready · paused'}).waitFor();
     await host.getByRole('button',{name:'Replay audio',exact:true}).click();await board.waitForFunction(()=>!document.querySelector('audio')!.paused);
     await mkdir('artifacts',{recursive:true});await board.screenshot({path:'artifacts/live-display-clue.png',fullPage:true});await host.screenshot({path:'artifacts/live-host-portrait.png',fullPage:true});
     // A second tab cannot acquire audio, and never plays it.
@@ -54,7 +58,7 @@ test('independent board and host browsers synchronize, protect answers, control 
     await host.getByRole('button',{name:'Reveal answer on display',exact:true}).click();await board.locator('.live-answer').getByText(game.categories[0].clues[0].answer,{exact:true}).waitFor();
     await board.reload();await board.locator('.live-answer').waitFor();assert.equal(await board.locator('audio').evaluate((a:HTMLAudioElement)=>a.paused),true);await board.getByRole('button',{name:'Enable Audio',exact:true}).waitFor();
     await host.reload();await host.getByRole('button',{name:'Answer revealed',exact:true}).waitFor();
-    await host.getByRole('button',{name:'Mark complete & return',exact:true}).click();await board.getByLabel('Kitchen science $200 complete',{exact:true}).waitFor();assert.equal(await board.locator('audio').evaluate((a:HTMLAudioElement)=>a.paused),true);
+    await host.getByRole('button',{name:'Return to board',exact:true}).click();await board.getByLabel('Kitchen science $200 complete',{exact:true}).waitFor();assert.equal(await board.locator('audio').evaluate((a:HTMLAudioElement)=>a.paused),true);
     await host.getByRole('button',{name:'Reopen Kitchen science $200',exact:true}).click();await host.getByRole('button',{name:'Reopen clue',exact:true}).click();await board.locator('.live-clue-text').waitFor();assert.equal(await board.locator('.live-answer').count(),0);
     await board.getByRole('button',{name:'Enable Audio',exact:true}).click();await board.getByText('Audio enabled on this display',{exact:true}).waitFor();
     await host.getByRole('button',{name:'Replay audio',exact:true}).click();await board.waitForFunction(()=>!document.querySelector('audio')!.paused);
@@ -69,7 +73,7 @@ test('independent board and host browsers synchronize, protect answers, control 
     await board.screenshot({path:'artifacts/live-display-board.png',fullPage:true});
     await other.goto(hostRoot+'/host#invalid');await other.getByRole('alert').filter({hasText:'Host link'}).waitFor();assert.equal(await other.locator('.live-answer').count(),0);
     host.once('dialog',d=>d.dismiss());await host.getByRole('button',{name:'End session',exact:true}).click();assert.ok(await current());
-    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'End session',exact:true}).click();await board.getByRole('heading',{name:'Waiting for a game',exact:true}).waitFor();assert.equal(await current(),null);
+    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'End session',exact:true}).click();await board.getByRole('heading',{name:'Final standings',exact:true}).waitFor();assert.equal((await current())!.finished,true);
     assert.deepEqual(errors,[]);
   }finally{await browser.close();await new Promise<void>(resolve=>live.io.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}
 });

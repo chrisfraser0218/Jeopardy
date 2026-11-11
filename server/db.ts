@@ -8,7 +8,7 @@ export function openStore(directory: string) {
   const db = new DatabaseSync(join(directory, 'games.sqlite'));
   db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
   const version = Number((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version);
-  if (version > 3) throw new Error('This database needs a newer app version.');
+  if (version > 4) throw new Error('This database needs a newer app version.');
   if (version < 1) db.exec(`BEGIN;
     CREATE TABLE games (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, updated_at TEXT NOT NULL, sample INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL);
     CREATE TABLE media (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, filename TEXT NOT NULL UNIQUE);
@@ -22,6 +22,14 @@ export function openStore(directory: string) {
   if (version < 3) db.exec(`BEGIN;
     CREATE TABLE session_players (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, name TEXT NOT NULL, name_key TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, removed INTEGER NOT NULL DEFAULT 0, UNIQUE(session_id, name_key));
     PRAGMA user_version=3; COMMIT;`);
+  if (version < 4) db.exec(`BEGIN;
+    CREATE TABLE response_attempts (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, player_id TEXT NOT NULL REFERENCES session_players(id), clue_id TEXT NOT NULL, value INTEGER NOT NULL CHECK(typeof(value)='integer'), accepted_at TEXT NOT NULL, status TEXT NOT NULL, effective_outcome TEXT, timer TEXT NOT NULL);
+    CREATE TABLE score_ledger (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, player_id TEXT NOT NULL REFERENCES session_players(id), clue_id TEXT, attempt_id TEXT REFERENCES response_attempts(id), amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, reference_id TEXT REFERENCES score_ledger(id));
+    CREATE UNIQUE INDEX one_judgment_per_attempt ON score_ledger(attempt_id) WHERE kind='judgment';
+    CREATE INDEX ledger_by_session ON score_ledger(session_id,player_id);
+    CREATE INDEX attempts_by_session ON response_attempts(session_id);
+    CREATE TABLE session_results (session_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    PRAGMA user_version=4; COMMIT;`);
   function get(id:string): Game | undefined {
     const g = db.prepare('SELECT * FROM games WHERE id=?').get(id) as any;
     if (!g) return;

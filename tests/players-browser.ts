@@ -42,7 +42,7 @@ test('QR decoding and independent phone buzzers: identity, racing, host correcti
     await host.getByRole('button',{name:'Hide player QR',exact:true}).click();await qr.waitFor({state:'hidden'});assert.equal(session().currentClueId,session().buzzer.clueId);
     await host.getByRole('button',{name:'Show player QR',exact:true}).click();await qr.waitFor();await board.locator('.live-clue-text').waitFor();
     await host.getByRole('button',{name:'Open buzzing',exact:true}).click();await alice.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();await bob.getByRole('heading',{name:'Buzzing open',exact:true}).waitFor();
-    await Promise.all([alice.getByRole('button',{name:'Buzz',exact:true}).click(),bob.getByRole('button',{name:'Buzz',exact:true}).click()]);
+    await Promise.all([alice.getByRole('button',{name:'Buzz',exact:true}).dispatchEvent('click'),bob.getByRole('button',{name:'Buzz',exact:true}).dispatchEvent('click')]);
     await host.locator('.buzz-winner').waitFor();const winnerName=live.publicState().players.find(p=>p.id===session().buzzer.winnerId)!.name;
     const winner=winnerName==='Alice'?alice:bob,loser=winnerName==='Alice'?bob:alice;
     await winner.getByRole('heading',{name:'You buzzed first',exact:true}).waitFor();await loser.getByRole('heading',{name:'Another player buzzed first',exact:true}).waitFor();assert.equal(await winner.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);assert.equal(await board.locator('.buzz-winner strong').innerText(),winnerName);
@@ -59,7 +59,7 @@ test('QR decoding and independent phone buzzers: identity, racing, host correcti
     host.once('dialog',d=>d.dismiss());await host.getByRole('button',{name:'Remove player Bob',exact:true}).click();assert.ok(live.publicState().players.some(p=>p.name==='Bob'));
     host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'Remove player Bob',exact:true}).click();await bob.getByRole('alert').filter({hasText:'removed'}).waitFor();assert.equal(await bob.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);await bob.reload();await bob.getByRole('alert').filter({hasText:'removed'}).waitFor();
     assert.equal(await alice.evaluate(()=>document.body.scrollWidth<=innerWidth),true);assert.equal(await alice.locator('audio').count(),0);
-    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'End session',exact:true}).click();await alice.getByRole('alert').filter({hasText:'session ended'}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);
+    host.once('dialog',d=>d.accept());await host.getByRole('button',{name:'End session',exact:true}).click();await alice.getByRole('heading',{name:'Game finished',exact:true}).waitFor();assert.equal(await alice.getByRole('button',{name:'Buzz',exact:true}).isDisabled(),true);
     live.start(store.list()[0].id);await eve.reload();await eve.getByRole('alert').filter({hasText:/expired|ended/}).waitFor();assert.notEqual(session().id,sid);
     assert.deepEqual(errors,[]);
   }finally{await browser.close();await new Promise<void>(resolve=>live.io.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}

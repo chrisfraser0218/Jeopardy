@@ -1,6 +1,6 @@
 # Blueboard — local Jeopardy-style game night
 
-Phase 3 adds individual player joining by local QR code and phone buzzers. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
+Phase 4 adds individual scoring, response timers, correction history, and complete standard-game results. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
 
 ## Start and stop
 
@@ -42,22 +42,61 @@ Normal startup remains just `./start.command`; it never installs packages or con
 
 The session panel shows localhost plus detected local IPv4 addresses; startup also prints available display addresses. If there are several addresses, use the one belonging to your Wi-Fi network (VPN/virtual adapters can also appear). Copy display/host link fields use the selected network address. **Open display** always uses the local MacBook origin so it can own audio. **Open host on this Mac** is useful for testing without an iPad. If copying is unavailable, select and copy the link field manually.
 
-Treat the host link as a private controller password. Anyone with it can retrieve answers and control that session. It is sent only by the localhost setup endpoint, is removed from the host address bar after opening, and stays in that tab's session storage for refreshes. To open a second host tab or browser, copy the private link from the library again. Ending a session invalidates the credential; a fresh session gets a new one. Device traffic uses local HTTP, so use a trusted local Wi-Fi network.
+Treat the host link as a private controller password. Anyone with it can retrieve answers and control that session. It is sent only by the localhost setup endpoint, is removed from the host address bar after opening, and stays in that tab's session storage for refreshes. To open a second host tab or browser, copy the private link from the library again. A finished game retains its host credential for results and corrections. Starting a fresh session invalidates that credential and creates a new one. Device traffic uses local HTTP, so use a trusted local Wi-Fi network.
 
-## Host controls
+## Standard-game flow and judging
 
-| Action | Result |
+Before **Start Game**, configure **Use response timer for next game** in the library. It defaults to **10 seconds**, can be set to **1–120 seconds**, or disabled. This setting belongs to the new live session and cannot be changed midgame. Editing it in the library affects only the next fresh game.
+
+The normal sequence is:
+
+1. Select a clue. It starts with buzzing closed and its answer hidden on the display. The private host sees the correct answer.
+2. Choose **Open buzzing**. Only eligible connected players can buzz. The server accepts one winner and starts that response's timer if enabled.
+3. In **Judge response**, review the player, current score, clue value, and correct answer. The human host judges the spoken response; the app does not evaluate answers.
+4. Choose **Correct** or **Incorrect**. If incorrect, explicitly reopen buzzing for another eligible player. If correct, the clue is resolved.
+5. Reveal the answer when ready, then **Return to board**. Once all 30 clues are resolved, choose **Finish Game**.
+
+| Host action | Result |
 | --- | --- |
-| Select an available clue | Opens it with the display answer hidden |
-| Reveal answer on display | Shows the answer; does **not** complete the clue |
-| Mark complete & return | Stops audio, removes the clue's value from the display board, and returns to the board |
-| Return without completing | Stops audio and returns the clue to the available board |
-| Reopen a completed clue | Requires an explicit confirmation; opens it again with the answer hidden |
-| End session | Requires confirmation and clears live progress; saved game definitions remain unchanged |
+| Correct | Adds the clue value exactly once, stops the timer, closes buzzing, and resolves the clue; does not automatically reveal the answer |
+| Incorrect | Subtracts the clue value exactly once, stops the timer, excludes that player for this clue, and leaves buzzing closed until explicitly reopened |
+| Dismiss attempt — no score | Stops the timer, dismisses the accepted response without points, and keeps buzzing closed; that player remains eligible |
+| Finish Without Winner | Dismisses any pending response, stops its timer, and resolves the clue without adding points; the host may reveal and return |
+| Reveal answer on display | Allowed after judging/dismissing; resolves the clue and prevents further competitive buzzing for that presentation |
+| Return without completing | Returns an unresolved clue to the board after any pending attempt has been judged/dismissed; it stops audio and buzzing |
+| Reopen a completed clue | Explicit confirmation opens it with its answer hidden; scores/history remain, and old attempts cannot be judged again |
+| Finish Game | Offered when all clues are resolved; freezes play and shows final standings |
+| End session | Confirmation ends early, disables timers/buzzers, and retains final standings and history |
 
-Invalid controls are disabled. Only one clue can be open at a time. If multiple hosts act at once, the server checks the session revision: a stale action is rejected and the current state is shown. Review the board before trying again after an error or missing acknowledgment.
+Every judgment belongs to a unique accepted attempt. Repeated taps, retries, reconnects, and concurrent host requests cannot score that attempt twice. Stale host actions are rejected and the current state is shown. The saved game definition remains separate and unchanged.
 
-One session can be active at a time. The library panel provides the current host link to continue that session or an **End session** option. Starting another game requires ending the existing session. Starting fresh resets all 30 clue positions while preserving the saved definition.
+If everyone has attempted/been excluded, resolve the clue with **Finish Without Winner**, or explicitly reset eligibility as a correction. If eligible players are disconnected, wait for reconnection or finish the clue. Buzzing cannot be opened when no eligible players are connected.
+
+### Response timer
+
+The countdown starts on server acceptance of a buzz, not on opening buzzing. It appears on the host, MacBook display, and winning player's phone. The server owns the deadline; client countdowns are displays only. The host may **Pause response timer** and **Resume response timer** for the current unresolved attempt.
+
+At expiry, the response is **timed out**, buzzing stays locked, and the host must judge it or dismiss it. **Timeout never deducts points automatically.** Old timer events cannot affect a later attempt or clue. The host cannot reveal/leave an unresolved response without explicitly judging, dismissing, or finishing that clue.
+
+On normal Control-C shutdown, the remaining time is saved paused. After an abrupt termination, recovery estimates remaining time from the stored deadline (which may already be exhausted). Either way, an unresolved response returns with its timer paused, buzzing closed, and no automatic score change. Resume the session first, then explicitly resume its response timer if time remains, or judge/dismiss it. Session resume does not restart the timer by itself.
+
+### Scores, corrections, and history
+
+Every player, including a midgame arrival, starts at **$0** in a fresh session. Scores are integer dollars and may be negative. Disconnected players retain their scores. The display and host keep registration order during clues; each phone shows its own current score. Removed players retain historical records and appear in the host's scoreboard/history, but do not enter active final standings.
+
+Open **Scoreboard & history → Scoring ledger** to see each entry's player, signed amount, reason, time, and related clue/attempt. Only the authenticated host can judge, adjust scores, control timers, or end the game. The localhost library's End session control also supplies the private host credential.
+
+- **Adjust score:** choose a player (including a removed player when correcting history), enter a nonzero positive or negative integer, and give a required reason. A single adjustment is limited to ±$1,000,000; total scores must stay within ±$1,000,000,000. Reasons are limited to 300 characters.
+- **Correct judgment:** choose an original judgment in the ledger, select the intended outcome (correct, incorrect, or dismissed), and give a reason. The app appends a reversal of that attempt's current effective score, then a replacement entry. It never deletes the original judgment. For example, changing a mistaken −$200 to a correct +$200 appends +$200 to reverse the deduction and +$200 for the intended award: a net correction of +$400.
+- Corrections change **scores only**. They do not reopen clues, undo completion, reset exclusions, or create a new response opportunity. If play must resume, separately reopen the clue and, if appropriate, reset eligibility. Reopening itself never reverses points. A newly accepted response is a new attempt; an old attempt cannot be scored again.
+
+Judgment, ledger entry, timer stop, and clue progress are committed atomically. Corrections may also be made after finishing; final standings update accordingly. Starting fresh clears the live board/scores/attempts while preserving the saved game and historical ledger/player/attempt/result records in SQLite. The current host history view is scoped to the current session; an archive-browsing interface is not included.
+
+### Finishing and ties
+
+After all clues are resolved, **Finish Game** shows score-ranked standings. Use **End session** with confirmation to finish early. Disconnected active players still rank; removed players do not. Equal scores share a rank (for example, 1, 1, 3), and ties for first show **Joint winners**. With no active players, results say so explicitly.
+
+Results remain on the display, host, and registered phones across refreshes and server restarts until a fresh session starts. Joining and buzzing are closed and timers/audio are stopped. Existing credentials can view those finished results; starting a fresh session invalidates old host/player credentials and links for entering the new game. Use **Start Game** on a saved complete game in the library to start fresh at zero.
 
 ## QR joining and phone buzzers
 
@@ -67,7 +106,7 @@ After starting a game, the MacBook display shows a **player QR code** and readab
 2. Scan the player QR or type its readable URL. This is a **public player link**, separate from the private host link. Never share the private host link with players.
 3. Enter your name or nickname and tap **Join game**. Names are normalized and trimmed on the server, limited to 24 characters, and compared without case differences. Empty/control-character names are rejected. If a name is already used, choose another (for example, add an initial). Removed names remain reserved for that session. Up to 64 registrations are allowed per session, including removed players.
 4. Keep that phone page open. It shows your name, connection state, and a large buzzer. Wait for **Buzzing open** and tap once. Early taps are discarded; they are never queued for when buzzing opens.
-5. A successful winning buzz shows **You buzzed first**; everyone else sees **Another player buzzed first** and the winning name. The display highlights that name while keeping the clue visible. There is no scoring or correct/incorrect judgment in this phase.
+5. A successful winning buzz shows **You buzzed first**; everyone else sees **Another player buzzed first** and the winning name. The display highlights that name while keeping the clue visible. The human host uses Correct or Incorrect to judge the spoken response.
 
 The host can **Open joining / Close joining**. Closing joining affects new registrations only: already registered players can reconnect and continue. **Hide player QR / Show player QR** changes only its visibility on the display and does not leave the clue or open/close joining. A known link still works while joining is open even if its QR is hidden.
 
@@ -86,11 +125,11 @@ Every newly selected clue starts with buzzing **closed**. Only the authenticated
 | Open buzzing | Creates a fresh server-issued window for eligible players; requires an open, unrevealed clue and no existing winner |
 | Close buzzing | Stops accepting taps; a later open creates a different window ID |
 | Clear accidental buzz & reopen | Clears the winner and opens a fresh window; that player stays eligible |
-| Exclude winner & reopen | Clears the winner, excludes that player for this clue, and opens for remaining eligible players; if nobody remains eligible, buzzing stays closed |
+| Exclude winner & reopen | Eligibility-only correction: excludes that player without points and reopens for eligible connected players. Use Incorrect when recording an incorrect response. If nobody remains eligible and connected, buzzing stays closed |
 | Reset clue eligibility… | Explicit confirmation clears the winner and all exclusions and **closes** buzzing; open it again manually |
 | Remove player | Explicit confirmation permanently invalidates that credential for the session; removing the current winner also clears the winner and closes buzzing |
 
-Exclusions survive later buzzer windows and returning to/reselecting that same clue. Selecting a different clue resets eligibility. Revealing an answer or completing/returning from a clue closes buzzing. An accepted winner stays visible through answer reveal; completion/return clears it. Ended sessions disable every phone, and old links/credentials cannot join or access a fresh session.
+Exclusions survive later buzzer windows and returning to/reselecting that same clue. Selecting a different clue resets eligibility. Revealing an answer or completing/returning from a clue closes buzzing. An accepted winner stays visible through answer reveal; completion/return clears it. Finished sessions disable buzzing and show results. Old links/credentials cannot join or access a fresh session.
 
 The server accepts the **first valid buzz received**, synchronously persists one winner, and closes that window before processing another attempt. It validates credentials, active-tab ownership, player eligibility, current clue, and window ID. Duplicate, early, stale, removed-player, unauthorized, and closed-window attempts are rejected. **Wi-Fi latency and device/browser scheduling can influence arrival order**; there is no promise of physical-tap simultaneity or latency compensation. Client timestamps do not decide the winner.
 
@@ -108,8 +147,8 @@ Play/Pause/Replay are short-lived commands for the current clue and revision, no
 
 - Refreshing a display or host reloads the current authoritative session, including the current clue, revealed answer state, and completed clues. The host credential in that tab survives refreshes.
 - When disconnected, controls stop accepting actions and the screen shows its connection status. Keep the server running and reconnect to Wi-Fi; Socket.IO reconnects and requests the current snapshot. There is no offline queue of host actions.
-- Player roster, credentials, current-clue exclusions, and any accepted winner survive a server restart. Connected status is rebuilt from live connections. Buzzing is closed and the previous window ID is invalidated; it never reopens automatically.
-- After stopping/restarting the server, progress is preserved and the session is **paused**. Open the current private host link from the MacBook library if needed, then tap **Resume session** on the host. The current clue and answer visibility are preserved. Re-enable audio on the display; it will not resume playing by itself. Open buzzing explicitly when ready. If a winner was already accepted, use Clear accidental buzz or Exclude winner before reopening.
+- Player roster, credentials, scores, ledger, current-clue exclusions, and any accepted winner survive a server restart. Connected status is rebuilt from live connections. Buzzing is closed and the previous window ID is invalidated; it never reopens automatically.
+- After stopping/restarting the server, progress is preserved and the session is **paused**. Open the current private host link from the MacBook library if needed, then tap **Resume session** on the host. The current clue and answer visibility are preserved. Re-enable audio on the display; it will not resume playing by itself. Open buzzing explicitly when ready. If a response is unresolved, explicitly resume its paused response timer or judge/dismiss it. Incorrect judging excludes that player and leaves buzzing closed until you reopen. Finished results need no session resume.
 - Saved-game edits and deletions do not alter an ongoing session: it uses its own copied game definition and retained media IDs.
 
 ## Wi-Fi and macOS troubleshooting
@@ -144,12 +183,12 @@ The UI labels these limits as MB (limits use 1,024² bytes). The server checks s
 
 | Location | Contents |
 | --- | --- |
-| `data/games.sqlite` | Saved definitions, separate answer records, media metadata, and the separate live-session snapshot/progress, and player credential hashes |
+| `data/games.sqlite` | Saved definitions, separate answer records, media metadata, and live-session snapshot/progress, player credential hashes, response attempts, score ledger, and final results |
 | `data/games.sqlite-wal`, `data/games.sqlite-shm` | SQLite working files while running |
 | `data/uploads/` | Local media files |
 | `dist/` | Built frontend, regenerated by `npm run build` |
 
-**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential. SQLite migration v3 adds a separate player table without replacing saved definitions or uploads. Existing Phase 2 snapshots are upgraded with buzzing closed and paused recovery. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
+**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential. SQLite migration v4 adds response-attempt, append-only score-ledger, and result tables without replacing saved definitions, uploads, sessions, or players. Older sessions initialize at zero with no invented past judgments; a known accepted winner becomes an unresolved response with its timer paused. Existing snapshots recover with buzzing closed. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
 
 Attachments are deliberately retained when removed, replaced, abandoned in an unsaved edit, or associated with a deleted game. Live snapshots and saved definitions may still need them. There is no automatic media cleanup, so disk use can grow. Deleting `data` permanently resets the entire library and active session.
 
@@ -173,23 +212,20 @@ Tests use temporary data, not your real library. Browser tests use installed Goo
 
 Run this checklist with your **MacBook, iPad, and at least two phones**:
 
-1. Put all four devices on the same Wi-Fi. Start the server, allow firewall access if prompted, start a complete game, and open the MacBook display fullscreen. Enable Audio there.
-2. Open the private host link on the iPad. Confirm its portrait/landscape controls are comfortable. Choose the correct player QR network address, then scan the display QR on both phones.
-3. Join with two different names. Try a duplicate with different capitalization/outer spaces and check the rejection. Close joining, refresh an existing phone (it should restore), and try registering a new player (it should be blocked).
-4. Select an image/audio clue. Verify image proportions and actual MacBook speaker sound, Play/Pause/Replay, and silence on the phones/iPad. Hide/show the QR while the same clue stays visible.
-5. Check both phones start with buzzing closed. Open buzzing and tap both phones as close together as you can. Exactly one name should win; both phones and the board should agree. Repeat several times with Clear accidental buzz. Real Wi-Fi order can differ from perceived tap order.
-6. Exclude a winner and reopen. Check that phone stays ineligible across several windows while the other can buzz. Explicitly reset eligibility, then verify a different clue starts with everyone eligible. Reveal an answer and confirm buzzing is disabled.
-7. Open a second tab on one phone: only one tab should be active. Refresh a phone, briefly disconnect/reconnect its Wi-Fi, and tap while disconnected. It must restore the same identity and never replay a tap.
-8. Remove a throwaway player with confirmation. Their phone should lock and their old credential should remain invalid after refresh. Reopen joining if you want a new unique registration.
-9. Accept a winner while another player is excluded; stop/restart the server. Confirm both identities, winner, and exclusion survive. Resume on the host, re-enable audio, and explicitly reopen buzzing. Also test restarting while buzzing is open: it must return closed.
-10. End the session with confirmation. Every phone should disable. Start fresh, check the board resets and saved game remains intact, and verify old QR links/credentials cannot enter the new game.
+1. Put all devices on the same Wi-Fi. Start a complete game with the default timer, open the MacBook display/fullscreen and private iPad host, enable display audio, and join two different names by QR. Check both phones begin at $0.
+2. Select a clue, open buzzing, buzz on one phone, and judge **Correct**. Check the clue value is added once on every screen, the timer stops, the clue resolves, and you can reveal and return. Retry taps must not add more points.
+3. On another clue, judge the first phone **Incorrect**. Check its deduction (including a negative total), timer stop, exclusion, and closed buzzing. Explicitly reopen, buzz on the second phone, and judge it. If nobody remains eligible/connected, check the host's explanation and Finish Without Winner option.
+4. Accept another buzz, pause/resume the response timer, then let it expire. Confirm the host, display, and winning phone show timeout and **no automatic deduction** occurs. Judge or dismiss explicitly. Check an accidental-buzz clear also changes no score.
+5. Use **Correct judgment** with a required reason, then a manual positive/negative adjustment. Check the original entry plus reversal/replacement remain visible and totals update. Confirm correcting a judgment does not automatically reopen the clue or reset eligibility.
+6. Restart the server with an unresolved response. Check scores/history survive, the response timer returns paused, buzzing remains closed, and session/timer require separate resume actions. Verify disconnected-player scores, phone refresh/reconnect, QR joining, and image/audio playback still work.
+7. Resolve unanswered clues with Finish Without Winner and finish the whole game, or end early with confirmation. Check ranked standings and joint winners after equalizing scores. Remove a throwaway player before finishing to verify exclusion from standings and retained history. Start fresh and confirm scores/progress reset while the saved game and past ledger records remain intact.
 
 ## Developer notes and scope
 
-React/TypeScript/Vite, Node/Express, SQLite via Node, and Socket.IO. All fonts/icons/assets are local; no CDN dependency. `server/access.ts` restricts local management. `server/live.ts` owns validated revisioned actions, per-connection roles, audio ownership, and field-by-field public projections. `shared/live.ts` defines wire shapes; `src/Live.tsx` provides the setup, display, and host interfaces. `server/players.ts` owns normalized names, hashed credentials, active tabs, and atomic buzzer acceptance; `src/Party.tsx` provides local QR generation, party controls, and phone pages. Public broadcasts omit host credentials and every unrevealed answer. The host credential is validated independently for HTTP private state and Socket.IO connections/actions.
+React/TypeScript/Vite, Node/Express, SQLite via Node, and Socket.IO. All fonts/icons/assets are local; no CDN dependency. `server/access.ts` restricts local management. `server/live.ts` owns validated revisioned actions, per-connection roles, audio ownership, and field-by-field public projections. `shared/live.ts` defines wire shapes; `src/Live.tsx` provides the setup, display, and host interfaces. `server/players.ts` owns normalized names, hashed credentials, active tabs, and atomic buzzer acceptance; `src/Party.tsx` provides local QR generation, party controls, and phone pages. `server/scoring.ts` owns attempt judgments, append-only ledger writes, timer deadlines/recovery, and standings; `src/Scoring.tsx` provides judging, countdowns, corrections/history, and final results. Public broadcasts omit host credentials and every unrevealed answer. The host credential is validated independently for HTTP private state and Socket.IO connections/actions.
 
-Saved games, categories, clues, and media keep stable IDs and explicit order. Session snapshots live separately from game definitions; action IDs and revisions protect retries and concurrent tabs. Audio ownership/playback is memory-only. Player identities are stored separately in `session_players`. Player socket/API payloads are built independently and contain no answers (even revealed ones) or host credentials. Presence is memory-only. Successful buzzes persist the winner/window/eligibility in the session snapshot; no scoring records or response timers exist.
+Saved games, categories, clues, and media keep stable IDs and explicit order. Session snapshots live separately from game definitions; action IDs and revisions protect retries and concurrent tabs. Audio ownership/playback is memory-only. Player identities are stored separately in `session_players`. Player socket/API payloads are built independently and contain no answers (even revealed ones) or host credentials. Presence is memory-only. Successful buzzes create persistent response attempts in the same transaction as the winner/window update. Host score changes and session progress use the same transaction, with post-commit broadcasts. Score totals are derived from ledger entries. Timers use server deadlines; no client timeout event has authority.
 
 For development, run `npm run dev:server` and `npm run dev` in separate Terminals. Vite proxies `/api` and `/socket.io` (including WebSockets) to Express. Normal startup serves all frontend, API, media, and Socket.IO traffic from one origin.
 
-Phase 3 includes no scoring, response timers, Daily Doubles, Double Jeopardy, Final Jeopardy, external accounts, or cloud deployment.
+Phase 4 includes no automatic answer evaluation, Daily Doubles, Double Jeopardy, Final Jeopardy, external accounts, or cloud deployment. The human host judges spoken responses.

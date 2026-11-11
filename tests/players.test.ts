@@ -80,7 +80,7 @@ test('joining, private identity, concurrent winners, eligibility, removal, and s
     playerSockets[1].disconnect();let promoted:PlayerState=reconnect.snapshot;reconnect.socket.on('player:state',s=>{promoted=s;});await waitFor(()=>promoted.activeTab);
     await act('board');await act('select',{clueId:first});await act('buzz-open');assert.equal((await attempt(reconnect.socket,live.publicState().session!.buzzer.windowId!)).ok,true);
     await act('complete');assert.equal(live.publicState().session!.buzzer.open,false);
-    live.endLocal();assert.equal((await joinName('New')).status,404);await assert.rejects(socketAt(root,'player',bob.credential,sid),/expired/);
+    live.endLocal();assert.equal((await joinName('New')).status,403);const finalPlayer=await socketAt(root,'player',bob.credential,sid);sockets.push(finalPlayer.socket);assert.equal(finalPlayer.snapshot.finished,true);
     live.start(game.id);assert.equal(live.publicState().players.length,0);assert.equal((await joinName('New',sid)).status,404);await assert.rejects(socketAt(root,'player',bob.credential,live.publicState().session!.id),/invalid/);
   }finally{sockets.forEach(s=>s.disconnect());await new Promise<void>(resolve=>live.io.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}
 });
@@ -112,8 +112,8 @@ test('Phase 2 active-session migration preserves saved data, credentials, and cu
     const old=createApp(directory);const game=old.store.get(old.store.list()[0].id)!;old.live.start(game.id);
     const before=old.live.hostState().session!;old.live.action({sessionId:before.id,expectedRevision:before.revision,commandId:crypto.randomUUID(),type:'select',clueId:game.categories[0].clues[0].id});
     const token=old.live.setup(3000).hostToken;const legacy:any=structuredClone(old.live.hostState().session);
-    for(const key of ['joiningOpen','joinOrigin','showJoinQr','buzzer'])delete legacy[key];
-    old.store.db.prepare('UPDATE live_session SET state=? WHERE slot=1').run(JSON.stringify(legacy));old.store.db.exec('DROP TABLE session_players; PRAGMA user_version=2;');await new Promise<void>(resolve=>old.live.io.close(()=>resolve()));old.store.db.close();
+    for(const key of ['joiningOpen','joinOrigin','showJoinQr','buzzer','timerSeconds','currentAttemptId','finished','results'])delete legacy[key];
+    old.store.db.prepare('UPDATE live_session SET state=? WHERE slot=1').run(JSON.stringify(legacy));old.store.db.exec('DROP TABLE score_ledger; DROP TABLE response_attempts; DROP TABLE session_results; DROP TABLE session_players; PRAGMA user_version=2;');await new Promise<void>(resolve=>old.live.io.close(()=>resolve()));old.store.db.close();
     const upgraded=createApp(directory);
     try{const current=upgraded.live.hostState().session!;assert.deepEqual(upgraded.store.get(game.id),game);assert.equal(current.id,legacy.id);assert.equal(current.currentClueId,legacy.currentClueId);assert.equal(upgraded.live.setup(3000).hostToken,token);assert.equal(current.paused,true);assert.equal(current.buzzer.open,false);assert.deepEqual(upgraded.live.publicState().players,[]);}
     finally{await new Promise<void>(resolve=>upgraded.live.io.close(()=>resolve()));upgraded.store.db.close();}

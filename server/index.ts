@@ -10,5 +10,6 @@ server.listen(port,process.env.HOST || '0.0.0.0',()=>{
   console.log('Library and editor: localhost only. Games and media stay on this Mac. Press Control-C to stop.');
 });
 for (const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>{
+  try{live.prepareShutdown();}catch(error){console.error('Could not pause the session for shutdown:',error);}
   live.io.close(()=>{store.db.close();process.exit(0);});
 });

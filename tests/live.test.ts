@@ -87,7 +87,8 @@ test('live session authority, privacy, snapshot isolation, commands, and audio o
     assert.equal((await result(host,command('board'))).ok,true);assert.equal(snapshot().currentClueId,null);assert.ok(!snapshot().completed.includes(first));
     assert.equal((await result(host,command('select',second))).ok,true);assert.equal((await result(host,command('complete'))).ok,true);
     await host.timeout(3000).emitWithAck('host:action',{...command('board'),extra:'no'}).then(r=>assert.equal(r.ok,false));
-    const ended=new Promise<void>(resolve=>host.once('disconnect',()=>resolve()));live.endLocal();await ended;assert.equal(live.publicState().session,null);assert.equal(live.authorized(token),false);assert.equal((await req('/live/host','GET',undefined,{Authorization:`Bearer ${token}`})).status,401);
+    live.endLocal();assert.equal(live.publicState().session!.finished,true);assert.equal(live.authorized(token),true,'host can correct retained results');
+
     live.start(game.id);assert.equal(snapshot().completed.length,0);assert.equal(snapshot().currentClueId,null);assert.notEqual(live.setup(port).hostToken,token);assert.equal(store.get(game.id)!.categories[0].clues[0].answer,'EDITOR ANSWER');assert.ok(stops>=1);
   }finally{sockets.forEach(s=>s.disconnect());await new Promise<void>(resolve=>live.io.close(()=>resolve()));store.db.close();await rm(directory,{recursive:true,force:true});}
 });
@@ -119,9 +120,9 @@ test('v1 database migration preserves existing definitions and media metadata',a
   try{
     const old=openStore(directory);const game=old.get(old.list()[0].id)!;
     old.db.prepare('INSERT INTO media VALUES (?, ?, ?, ?, ?, ?)').run('kept-media','image','kept.png','image/png',100,'kept.png');
-    old.db.exec('DROP TABLE session_players; DROP TABLE live_session; PRAGMA user_version=1;');old.db.close();
+    old.db.exec('DROP TABLE score_ledger; DROP TABLE response_attempts; DROP TABLE session_results; DROP TABLE session_players; DROP TABLE live_session; PRAGMA user_version=1;');old.db.close();
     const migrated=openStore(directory);
-    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,3);}
+    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,4);}
     finally{migrated.db.close();}
   }finally{await rm(directory,{recursive:true,force:true});}
 });

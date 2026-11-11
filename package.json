@@ -1,6 +1,6 @@
 {
   "name": "blueboard-local",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,7 +13,7 @@
     "start": "node --import tsx server/index.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "check": "npm run build && npm test",
-    "test:browser": "node --import tsx --test tests/browser.ts tests/live-browser.ts tests/players-browser.ts"
+    "test:browser": "node --import tsx --test tests/browser.ts tests/live-browser.ts tests/players-browser.ts tests/scoring-browser.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
