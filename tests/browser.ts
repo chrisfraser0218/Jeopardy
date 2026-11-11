@@ -99,7 +99,7 @@ test('Chrome: library, editor, media, preview, unsaved warning, and responsive l
     page.on('pageerror',e=>errors.push(e.message));
     await page.goto(url);
     await page.locator('.game-card').filter({has:page.getByRole('heading',{name:'Browser game',exact:true})}).getByRole('button',{name:'Open editor'}).click();
-    const dimensions=await page.evaluate(()=>({width:window.innerWidth,scroll:document.documentElement.scrollWidth}));
+    const dimensions=await page.evaluate(()=>({width:window.innerWidth,scroll:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth).slice(-12).map(e=>({tag:e.tagName,cls:e.className,width:e.getBoundingClientRect().width,text:e.textContent?.slice(0,50)}))}));
     assert.ok(dimensions.scroll<=dimensions.width,`no page-wide horizontal overflow: ${JSON.stringify(dimensions)}`);
     await page.screenshot({path:'artifacts/mobile-editor.png',fullPage:true});
     await page.getByRole('button',{name:'Game library'}).click();

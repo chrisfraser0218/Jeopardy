@@ -1,6 +1,6 @@
 import type { GameResults, HostAction, LedgerEntry, LiveSession, Outcome, ResponseAttempt, ResponseTimer } from '../shared/live.js';
 import type { openStore } from './db.js';
-import { currentDefinition, boardProgress } from '../shared/rounds.js';
+import { currentDefinition, boardProgress, currentPolicy } from '../shared/rounds.js';
 import type { Clue } from '../shared/model.js';
 
 type Store=ReturnType<typeof openStore>;
@@ -37,7 +37,8 @@ export function scoringService(store:Store,getSession:()=>LiveSession|null,trans
     const s=getSession()!;add(target.playerId,outcome==='correct'?target.value:-target.value,'judgment',outcome==='correct'?'Correct spoken response':'Incorrect spoken response',target);
     target.status=outcome;target.effectiveOutcome=outcome;stopTimer(target);save(target);s.buzzer.open=false;
     if(resolveClue&&(outcome==='correct'||target.kind==='daily-double'))resolve();
-    if(outcome==='incorrect'&&target.kind!=='final'){if(!s.buzzer.excludedIds.includes(target.playerId))s.buzzer.excludedIds.push(target.playerId);s.buzzer.winnerId=null;s.buzzer.windowId=null;}
+    if(resolveClue&&outcome==='correct'&&target.kind!=='final')s.revealed=true;
+    if(outcome==='incorrect'&&target.kind!=='final'){if((target.kind==='daily-double'||currentPolicy(s)==='one')&&!s.buzzer.excludedIds.includes(target.playerId))s.buzzer.excludedIds.push(target.playerId);s.buzzer.winnerId=null;s.buzzer.windowId=null;}
   }
   function hostAction(a:HostAction){
     const s=getSession()!;

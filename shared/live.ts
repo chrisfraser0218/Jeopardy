@@ -13,6 +13,7 @@ export type LiveSession = {
   joinOrigin: string | null;
   showJoinQr: boolean;
   buzzer: BuzzerState;
+  buzzerMode?: 'manual' | 'automatic';
   timerSeconds: number | null;
   currentAttemptId: string | null;
   finished: boolean;
@@ -24,7 +25,7 @@ export type LiveSession = {
 export type PublicClue = { id: string; order: number; value: number; text: string; imageId: string | null; audioId: string | null; answer?: string };
 export type PublicSession = Omit<LiveSession, 'game'|'dailyDouble'|'final'> & {
   dailyDouble:PublicDailyDouble|null; final:FinalStage|null;
-  game: { title: string; categories: {id: string; order: number; name: string; clues: PublicClue[]}[] };
+  game: { title: string; categories: {id: string; order: number; name: string; attemptPolicy?:'repeat'|'one'; clues: PublicClue[]}[] };
 };
 export type AudioStatus = { ownerId: string | null; ready: boolean; playback: 'stopped' | 'playing' | 'paused'; error: string | null };
 export type LiveState = { session: PublicSession | null; audio: AudioStatus; players: PlayerPublic[]; joinOrigins?: string[]; attempt: ResponseAttempt | null; serverNow: number; ledger?: LedgerEntry[]; attempts?: ResponseAttempt[]; allPlayers?: (PlayerPublic & {removed:boolean})[]; progress:{resolved:number;total:number;hasNext:boolean}; final:FinalPublic|null; finalSubmissions?:FinalSubmission[]; dailyDoubleLimits?:Record<string,number> };
@@ -36,7 +37,7 @@ export type Setup = { session: {id: string; title: string; paused: boolean; comp
 
 export type BuzzerState = { clueId: string | null; windowId: string | null; open: boolean; winnerId: string | null; excludedIds: string[]; attemptedIds: string[] };
 export type PlayerPublic = { id: string; name: string; connected: boolean; score: number };
-export type PlayerState = { sessionId: string; title: string; paused: boolean; joiningOpen: boolean; currentClueId: string | null; revealed: boolean; buzzer: BuzzerState; players: PlayerPublic[]; self: PlayerPublic | null; activeTab: boolean; finished: boolean; results: GameResults | null; attempt: ResponseAttempt | null; serverNow: number; round:RoundName; dailyDouble:PublicDailyDouble|null; final:FinalPublic|null; finalOwn:FinalOwn|null };
+export type PlayerState = { sessionId: string; title: string; paused: boolean; joiningOpen: boolean; currentClueId: string | null; revealed: boolean; buzzer: BuzzerState; players: PlayerPublic[]; self: PlayerPublic | null; activeTab: boolean; finished: boolean; results: GameResults | null; attempt: ResponseAttempt | null; serverNow: number; attemptPolicy?:'repeat'|'one'; ownAttemptCount?:number; buzzerMode?:'manual'|'automatic'; round:RoundName; dailyDouble:PublicDailyDouble|null; final:FinalPublic|null; finalOwn:FinalOwn|null };
 export type PlayerIdentity = { sessionId: string; player: { id: string; name: string }; credential: string };
 
 export type Outcome = 'correct' | 'incorrect' | 'dismissed';

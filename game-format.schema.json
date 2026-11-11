@@ -1,0 +1,362 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "jeopardy-game"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "game": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "categories": {
+          "minItems": 6,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "attemptPolicy": {
+                "type": "string",
+                "enum": [
+                  "repeat",
+                  "one"
+                ]
+              },
+              "clues": {
+                "minItems": 5,
+                "maxItems": 5,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 10000
+                    },
+                    "answer": {
+                      "type": "string",
+                      "maxLength": 5000
+                    },
+                    "dailyDouble": {
+                      "type": "boolean"
+                    },
+                    "image": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "audio": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "order",
+                    "value",
+                    "text",
+                    "answer",
+                    "image",
+                    "audio"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "order",
+              "name",
+              "attemptPolicy",
+              "clues"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "doubleJeopardy": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "categories": {
+                  "minItems": 6,
+                  "maxItems": 6,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "order": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      "attemptPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "repeat",
+                          "one"
+                        ]
+                      },
+                      "clues": {
+                        "minItems": 5,
+                        "maxItems": 5,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "order": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 4
+                            },
+                            "value": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "text": {
+                              "type": "string",
+                              "maxLength": 10000
+                            },
+                            "answer": {
+                              "type": "string",
+                              "maxLength": 5000
+                            },
+                            "dailyDouble": {
+                              "type": "boolean"
+                            },
+                            "image": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "audio": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "order",
+                            "value",
+                            "text",
+                            "answer",
+                            "image",
+                            "audio"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "order",
+                      "name",
+                      "attemptPolicy",
+                      "clues"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "enabled",
+                "categories"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finalJeopardy": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "category": {
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "clue": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 10000
+                    },
+                    "answer": {
+                      "type": "string",
+                      "maxLength": 5000
+                    },
+                    "dailyDouble": {
+                      "type": "boolean"
+                    },
+                    "image": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "audio": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "order",
+                    "value",
+                    "text",
+                    "answer",
+                    "image",
+                    "audio"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "enabled",
+                "category",
+                "clue"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "categories"
+      ],
+      "additionalProperties": false
+    },
+    "media": {
+      "maxItems": 122,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^media\\/(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.(?:jpg|jpeg|png|webp|mp3|wav)$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "attribution": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "game",
+    "media"
+  ],
+  "additionalProperties": false,
+  "$id": "urn:local-jeopardy:game-format:1",
+  "title": "Jeopardy portable game v1"
+}

@@ -1,0 +1,16 @@
+import { z } from 'zod';
+import { writeFile,mkdir } from 'node:fs/promises';
+import { deflateSync } from 'node:zlib';
+import { manifestSchema,type Manifest } from '../shared/transfer.js';
+import { zipFiles } from '../server/transfer.js';
+await mkdir('examples',{recursive:true});
+const categories=Array.from({length:6},(_,i)=>({order:i,name:['Everyday words','Two choices','Small numbers','Our sky','Shapes','Sounds'][i],attemptPolicy:i%2?'one' as const:'repeat' as const,clues:Array.from({length:5},(_,j)=>({order:j,value:200*(j+1),text:`Practice clue ${i+1}.${j+1}: say the word “hello”.`,answer:'Hello',image:null,audio:null,dailyDouble:false}))}));
+const manifest:Manifest={format:'jeopardy-game',version:1,game:{title:'A friendly practice board',description:'Original practice questions. Edit freely; includes both category attempt policies.',categories},media:[]};
+await writeFile('examples/text-only.json',JSON.stringify(manifest,null,2)+'\n');
+function crc(bytes:Buffer){let n=0xffffffff;for(const b of bytes){n^=b;for(let i=0;i<8;i++)n=(n>>>1)^((n&1)?0xedb88320:0);}return (n^0xffffffff)>>>0;}
+function chunk(type:string,data:Buffer){const b=Buffer.alloc(data.length+12);b.writeUInt32BE(data.length);b.write(type,4);data.copy(b,8);b.writeUInt32BE(crc(b.subarray(4,-4)),b.length-4);return b;}
+const header=Buffer.alloc(13);header.writeUInt32BE(160);header.writeUInt32BE(100,4);header[8]=8;header[9]=2;const pixels=Buffer.alloc(100*(1+160*3));for(let y=0;y<100;y++)for(let x=0;x<160;x++){const at=y*481+1+x*3;pixels[at]=x<80?239:30;pixels[at+1]=x<80?196:70;pixels[at+2]=x<80?110:120;}const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(pixels)),chunk('IEND',Buffer.alloc(0))]);
+const wav=Buffer.alloc(44+16000);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(16000,40);for(let i=0;i<8000;i++)wav.writeInt16LE(Math.round(Math.sin(2*Math.PI*440*i/8000)*4000),44+i*2);
+const media=structuredClone(manifest);media.game.title='Picture and tone practice';media.game.categories[4].clues[0]={order:0,value:200,text:'Name either color in this original two-color picture.',answer:'Gold or blue',image:'media/colors.png',audio:null,dailyDouble:false};media.game.categories[5].clues[0]={order:0,value:200,text:'Is this tone continuous or a spoken word?',answer:'A continuous tone',image:null,audio:'media/tone.wav',dailyDouble:false};media.media=[{path:'media/colors.png',name:'Original two-color picture',attribution:'Original procedural graphic created for this project; dedicated to CC0.'},{path:'media/tone.wav',name:'Original 440 Hz tone',attribution:'Original synthesized tone created for this project; dedicated to CC0.'}];
+const files=new Map([['manifest.json',Buffer.from(JSON.stringify(media,null,2))],['media/colors.png',png],['media/tone.wav',wav]]);await writeFile('examples/image-audio.zip',await zipFiles(files));
+const schema=z.toJSONSchema(manifestSchema);await writeFile('game-format.schema.json',JSON.stringify({...schema,$id:'urn:local-jeopardy:game-format:1',title:'Jeopardy portable game v1'},null,2)+'\n');

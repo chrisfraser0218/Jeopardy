@@ -48,6 +48,7 @@ test('independent board and host browsers synchronize, protect answers, control 
     // Keep the play promise pending, then reject it after a newer pause command.
     await board.locator('audio').evaluate((a:HTMLAudioElement)=>{const original=a.play.bind(a);(a as any).restoreDelayedPlay=()=>{a.play=original;};a.play=async()=>{await original();await new Promise<void>((_resolve,reject)=>{(a as any).rejectLatePlay=reject;});};});
     await host.getByRole('button',{name:'Play audio',exact:true}).click();await board.waitForFunction(()=>!document.querySelector('audio')!.paused);
+    await board.waitForFunction(()=>typeof (document.querySelector('audio') as any).rejectLatePlay==='function');
     await host.getByRole('button',{name:'Pause audio',exact:true}).click();await board.waitForFunction(()=>document.querySelector('audio')!.paused);
     await board.locator('audio').evaluate((a:HTMLAudioElement)=>{(a as any).rejectLatePlay(new Error('Late rejection after intentional pause'));(a as any).restoreDelayedPlay();});
     await host.getByRole('status').filter({hasText:'Ready · paused'}).waitFor();

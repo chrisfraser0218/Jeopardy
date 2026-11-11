@@ -1,8 +1,46 @@
 # Blueboard — local Jeopardy-style game night
 
-Phase 5 adds optional Double Jeopardy, Daily Doubles, and private Final Jeopardy wagering/responses. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
+Phase 6 adds an Apple Silicon Mac application, portable game import/export with media, and storage/lifecycle safeguards. Manual/Automatic buzzing, category attempt policies, and automatic answer reveals remain available. Optional Double Jeopardy and private Final Jeopardy wagering/responses remain available. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
 
-## Start and stop
+## Install and launch Jeopardy.app
+
+The built application is `release/Jeopardy-darwin-arm64/Jeopardy.app`. The installation archive is `release/Jeopardy-mac-arm64.zip`. Unzip it in Finder, drag **Jeopardy.app** to **Applications**, and double-click. Only the MacBook installs the app; iPad and phones use browsers. Normal launch needs no Terminal, Node installation, dependency install, rebuild, internet, account, or subscription. The app bundles Electron, Node, SQLite, the backend, and frontend for this Mac's **arm64** architecture. The interface continues to use the Blueboard name. The release app measures 256.1 MiB of file contents (257.7 MiB disk allocation); the ZIP is 114.5 MiB. User data and development dependencies are separate; see VERIFICATION.md for measurements.
+
+This is a local, **ad hoc signed, not Developer ID signed or notarized** build. macOS may warn on opening a downloaded unsigned app. After attempting to open it, use the app-specific **Open Anyway** action in System Settings → Privacy & Security, as described in [Apple’s opening instructions](https://support.apple.com/en-ie/102445). Do not disable Gatekeeper or other system-wide protections. If your Mac's managed policy forbids unsigned applications, ask its administrator. No signing service was purchased and nothing was published.
+
+The app confirms backend readiness before opening the library. It checks the preferred port (3000) and chooses a free port if occupied, leaving unrelated processes alone. **Use the links shown in this running app**, which contain the actual port; do not assume 3000. A second launch focuses the existing window. Use **Window → Open display** or the library's Open display link for the MacBook screen; enable audio on that display once. The copied private iPad host link and public phone QR use your selected current Wi-Fi address.
+
+**Closing the last window keeps hosting running.** Click the Dock icon or **Window → Open library** to reopen. **Jeopardy → Quit Jeopardy / Command-Q** stops hosting and its backend; during an active game it asks before quitting. Progress recovers paused on the next launch, buzzing closed, timers paused, and audio stopped. Keep the MacBook awake, plugged in, and **lid open**. Idle system/display sleep is prevented while a game is active, but the app does not make closed-lid hosting work.
+
+If the backend fails, use **Restart hosting** in the recovery dialog or Help menu. Devices disconnect briefly; saved state returns paused. Resume explicitly on the host, re-enable display audio, and open buzzing/resume timers as needed. Recovery never replays audio, phone submissions, or score actions. **Help → Open diagnostics** reveals `logs/application.log` in the app's data folder; it records startup/exit/version/port events without host tokens, request bodies, player answers, or wagers. Startup errors suggest storage/permissions/free-space checks and offer retry/diagnostics.
+
+## Installed storage, migration, and updates
+
+Installed data lives at **`~/Library/Application Support/Jeopardy/`**: `games.sqlite`, `uploads/`, `logs/`, retained `backups/`, and Chromium profile files. It stays outside the app bundle and survives replacing the application. Development continues to use `/Users/chrisfraser/Jeopardy/data/` (or an explicit separate `DATA_DIR`). A process lock prevents two hosts writing the same data folder; development rejects the installed app's standard storage path. Stop the relevant host before manually inspecting or backing up its data. Never remove a lock while its process is alive.
+
+On first installed launch, choose a separate fresh library or **Copy existing data…**, selecting the old `data` folder. Quit the development server first. Migration uses SQLite's backup API (not a blind copy of an active database), copies managed media, validates database integrity/references and saved boards, and only then publishes the new library. The source and a consistent backup remain. It never overwrites an existing destination database or uploads folder. If both libraries already exist, keep both: export games from the old local library and import them into the installed app. Session/history migration is a whole-library first-launch copy; game import intentionally does not transfer private live state. No real user data was migrated during automated verification.
+
+Before upgrading an existing installed database's schema, the bundled backend makes and validates a database/media backup under `backups/before-v7-…/`. Migration backups use `backups/migration-…/`. Do not delete originals/backups until you have independently checked your games/media. Schema v7 adds optional media-attribution storage; prior scores, attempts, credentials, and settings are retained.
+
+To rebuild an update from this checkout, install build dependencies once if needed, then run:
+
+```sh
+export PATH="$PWD/.runtime/node/bin:$PATH"
+npm ci
+npm run package:mac
+```
+
+Quit the old application, replace only `Jeopardy.app` in Applications, and reopen. **Do not replace or delete Application Support data.** The build is local and makes no automatic updater/network requests. Keep the project and its development data separate. The release ZIP contains the application, not your library, backups, or development dependencies.
+
+## Import and export games
+
+In the MacBook library, **Import Game** accepts version-1 JSON or ZIP packages. Review title, enabled rounds, category names, clue/media counts and draft warnings, then **Confirm import**. Cancel leaves the library unchanged; previews expire after ten minutes. Each confirmed import creates a separate new game with new internal IDs, even if the title matches. Existing games and the live session stay intact. Invalid files produce an error and are not partially added.
+
+Each game card offers **Export JSON** and **Export ZIP**. JSON is for text-only games. ZIP includes `manifest.json` and every referenced image/audio file, including disabled optional-round drafts. If attachments exist, JSON export explains that ZIP is required; it never silently removes them. Missing files must be repaired before exporting a complete package. Unused uploads are retained locally but are not exported. Attribution travels with media. Exports include definitions, answers, drafts, Daily Doubles, optional rounds, and category policies; they exclude sessions, players, credentials, wagers, responses, scores/history, and the Manual/Automatic session-start choice.
+
+The Help menu’s **Game format and examples** action reveals copies bundled for offline reference. See [GAME_FORMAT.md](GAME_FORMAT.md), [JSON Schema](game-format.schema.json), [verified JSON example](examples/text-only.json), [verified image/audio ZIP](examples/image-audio.zip), and [reusable ChatGPT prompt](CHATGPT_GAME_PROMPT.md). ZIP import rejects unsafe paths, symlinks, duplicate entries, unsupported types/versions, mismatched contents, and missing attachments, with bounded archive/expanded/file sizes. It never fetches remote assets or executes imported text.
+
+## Development start and stop
 
 From Terminal:
 
@@ -11,7 +49,7 @@ cd /Users/chrisfraser/Jeopardy
 ./start.command
 ```
 
-Open **http://localhost:3000** on the MacBook. Keep Terminal running. Press **Control-C** in that Terminal to stop. Restart with the same command. You can also double-click `start.command` in Finder.
+For development, open **http://localhost:3000** on the MacBook. Keep Terminal running. Press **Control-C** in that Terminal to stop. Restart with the same command. You can also double-click `start.command` in Finder.
 
 This workspace includes installed dependencies, a built frontend, and an ignored checkout-local Node runtime. For a fresh checkout, install **Node.js 24.11 or newer** from [nodejs.org](https://nodejs.org), reopen Terminal, and run:
 
@@ -34,7 +72,7 @@ Normal startup remains just `./start.command`; it never installs packages or con
 
 ## Set up the MacBook display and iPad host
 
-1. Connect the MacBook and iPad to the **same local Wi-Fi**. Open the library through **localhost on the MacBook**.
+1. Connect the MacBook and iPad to the **same local Wi-Fi**. Open Jeopardy.app, or the development library through **localhost on the MacBook**.
 2. Save a complete game: a nonempty title and category names, plus an answer and at least one of text/image/audio in every clue of each enabled round. Choose **Start Game** on its library card. Draft cards offer **Check start requirements**, which lists missing items. Unsaved editor changes are not included: return to the library after saving first.
 3. In the session panel, choose **Open display**. This opens `http://localhost:3000/display` in another tab. Put that tab on the TV/projector and choose **Fullscreen**. Choose **Enable Audio** on this tab once. Keep the library and private host off the projected screen.
 4. In the library session panel, select the MacBook's Wi-Fi address (for example, `http://192.168.1.25:3000`). **Copy host link**, then transfer/paste the whole private link into the iPad browser. The link includes a long credential after `#`. **Do not use localhost on the iPad**: that refers to the iPad itself.
@@ -48,18 +86,27 @@ Treat the host link as a private controller password. Anyone with it can retriev
 
 Before **Start Game**, configure **Use response timer for next game** in the library. It defaults to **10 seconds**, can be set to **1–120 seconds**, or disabled. This setting belongs to the new live session and cannot be changed midgame. Editing it in the library affects only the next fresh game.
 
+Choose **Buzzer activation for next game** before starting. **Manual** (the default) requires the host to open buzzing. **Automatic** opens immediately when a standard text, image, or audio clue appears and reopens after an incorrect judgment when eligible connected players remain. It does **not** wait for audio playback to finish. Daily Doubles and Final keep their special participation rules. The mode is frozen in the session; the host controller shows it. Close buzzing keeps it closed until an explicit reopening or a fresh gameplay transition. Refresh/reconnect never opens it; restart always closes buzzing and requires explicit host action.
+
+Each first-board and Double-board category has a **Category attempt policy** in the editor beside the selected clue:
+
+- **Repeat attempts allowed**: players can buzz again after an incorrect response, losing the clue value for every distinct incorrect attempt. New categories default to this policy.
+- **One attempt per player**: an incorrect response excludes that player for the remainder of the clue, useful for true/false and other two-answer categories. Existing categories and active snapshots missing a policy migrate to this setting to preserve their prior behavior.
+
+Policies belong to categories and are copied into the session snapshot. Editing the saved game does not change a running session. Explicit host exclusions apply under either policy. For example, three incorrect $200 attempts followed by a correct fourth attempt produce −$600 + $200 = **−$400** from zero. Each needs a fresh tap in a new server-issued window; taps are never queued or replayed.
+
 The normal sequence is:
 
-1. Select a clue. It starts with buzzing closed and its answer hidden on the display. The private host sees the correct answer.
-2. Choose **Open buzzing**. Only eligible connected players can buzz. The server accepts one winner and starts that response's timer if enabled.
+1. Select a clue. Its answer starts hidden. Buzzing stays closed in Manual mode and opens immediately in Automatic mode when an eligible connected player is available. The private host sees the correct answer.
+2. In Manual mode, choose **Open buzzing**. Only eligible connected players can buzz. The server accepts one winner and starts that response's timer if enabled.
 3. In **Judge response**, review the player, current score, clue value, and correct answer. The human host judges the spoken response; the app does not evaluate answers.
-4. Choose **Correct** or **Incorrect**. If incorrect, explicitly reopen buzzing for another eligible player. If correct, the clue is resolved.
-5. Reveal the answer when ready, then **Return to board**. When the board is resolved, explicitly advance to the next enabled round, or choose **Finish Game** if no round remains. Final Jeopardy finishes after every eligible result is revealed.
+4. Choose **Correct** or **Incorrect**. Incorrect applies the category policy; Manual keeps buzzing closed, while Automatic opens a fresh window if eligible connected players remain. Correct resolves the clue and automatically reveals its answer.
+5. After Correct, the clue, image, and revealed answer stay visible, and audio stops. Choose **Return to board** when ready. Manual answer reveal remains available for unanswered clues. When the board is resolved, explicitly advance to the next enabled round, or choose **Finish Game** if no round remains. Final Jeopardy finishes after every eligible result is revealed.
 
 | Host action | Result |
 | --- | --- |
-| Correct | Adds the clue value exactly once, stops the timer, closes buzzing, and resolves the clue; does not automatically reveal the answer |
-| Incorrect | Subtracts the clue value exactly once, stops the timer, excludes that player for this clue, and leaves buzzing closed until explicitly reopened |
+| Correct | Adds the clue value exactly once, stops the timer, closes buzzing, resolves the clue, reveals its answer, and stops clue audio; presentation stays until Return to board |
+| Incorrect | Subtracts the clue value exactly once, stops the timer, applies the category attempt policy, and opens a fresh window only in Automatic mode when eligible connected players remain; never reveals the answer |
 | Dismiss attempt — no score | Stops the timer, dismisses the accepted response without points, and keeps buzzing closed; that player remains eligible |
 | Finish Without Winner | Dismisses any pending response, stops its timer, and resolves the clue without adding points; the host may reveal and return |
 | Reveal answer on display | Allowed after judging/dismissing; resolves the clue and prevents further competitive buzzing for that presentation |
@@ -70,7 +117,7 @@ The normal sequence is:
 
 Every judgment belongs to a unique accepted attempt. Repeated taps, retries, reconnects, and concurrent host requests cannot score that attempt twice. Stale host actions are rejected and the current state is shown. The saved game definition remains separate and unchanged.
 
-For standard clues, if everyone has attempted/been excluded, resolve the clue with **Finish Without Winner**, or explicitly reset eligibility as a correction. If eligible players are disconnected, wait for reconnection or finish the clue. Buzzing cannot be opened when no eligible players are connected.
+For standard clues, if everyone is excluded by the category rule or host, resolve the clue with **Finish Without Winner**, or explicitly reset eligibility as a correction. If eligible players are disconnected, wait for reconnection or finish the clue. Buzzing cannot be opened when no eligible players are connected. A later reconnect alone does not reopen it; the host can choose Open buzzing.
 
 ### Response timer
 
@@ -122,7 +169,7 @@ Selecting a Daily Double shows an announcement while its clue stays hidden. Norm
 1. On the host, identify the nonremoved player who physically chose the clue.
 2. Enter and **Confirm Daily Double wager**. The allowed integer range is **$5 through the greater of that player's score or the highest configured value on the current board**. Zero and negative scores still get the board's maximum. The host shows the range and the server enforces it.
 3. Before revealing, you may change the player (which clears the wager) or confirm a different wager. Choose **Reveal Daily Double clue** only when setup is correct.
-4. The selected player responds alone; the normal response timer starts if enabled. Correct adds the wager; incorrect subtracts it. Either judgment resolves the clue, and other players cannot rebuzz. Timeout still requires a host judgment and never deducts automatically.
+4. The selected player responds alone; the normal response timer starts if enabled. Correct adds the wager; incorrect subtracts it. Either judgment resolves the clue, and other players cannot rebuzz. Correct automatically reveals the answer and stops audio, awarding the wager once; Incorrect keeps the answer hidden. Timeout still requires a host judgment and never deducts automatically.
 
 **Correct Daily Double setup after reveal…** is an explicit, reasoned workflow. It compensates any existing judgment on that attempt (or records the dismissed pending attempt), changes player/wager, reopens this clue as a new accepted attempt, and pauses its new timer if enabled. The pre-Daily-Double score is used for correction limits. Judge that new attempt or explicitly resume its timer. Old attempts remain in history and cannot be judged twice. After leaving the clue, normal ledger corrections/manual adjustments remain available; they do not automatically redo play.
 
@@ -154,7 +201,7 @@ Choose **Reveal [player]'s result** in any order. That action reveals the respon
 
 After a result is public, use the existing **Correct judgment** workflow with a reason for compensating entries. Final corrections must remain correct/incorrect, and a blank cannot become correct. During partial reveals, only already revealed Final judgments can be corrected; other score adjustments wait until Final finishes. Every eligible result must be revealed before final standings appear. Ties remain joint winners; there is no tiebreaker.
 
-Ending early is still possible with confirmation. Only already committed/revealed scores are counted; unrevealed Final judgments are abandoned without points. Starting fresh invalidates previous live credentials, resets play, and preserves historical records in SQLite. Packaging and export/import remain outside this phase.
+Ending early is still possible with confirmation. Only already committed/revealed scores are counted; unrevealed Final judgments are abandoned without points. Starting fresh invalidates previous live credentials, resets play, and preserves historical records in SQLite.
 
 ## QR joining and phone buzzers
 
@@ -206,7 +253,7 @@ Play/Pause/Replay are short-lived commands for the current clue and revision, no
 - Refreshing a display or host reloads the current authoritative session, including the current clue, revealed answer state, and completed clues. The host credential in that tab survives refreshes.
 - When disconnected, controls stop accepting actions and the screen shows its connection status. Keep the server running and reconnect to Wi-Fi; Socket.IO reconnects and requests the current snapshot. There is no offline queue of host actions.
 - Player roster, credentials, scores, ledger, current-clue exclusions, and any accepted winner survive a server restart. Connected status is rebuilt from live connections. Buzzing is closed and the previous window ID is invalidated; it never reopens automatically.
-- After stopping/restarting the server, progress is preserved and the session is **paused**. Open the current private host link from the MacBook library if needed, then tap **Resume session** on the host. The current clue and answer visibility are preserved. Re-enable audio on the display; it will not resume playing by itself. Open buzzing explicitly when ready. If a response is unresolved, explicitly resume its paused response timer or judge/dismiss it. Incorrect judging excludes that player and leaves buzzing closed until you reopen. Finished results need no session resume.
+- After stopping/restarting the server, progress is preserved and the session is **paused**. Open the current private host link from the MacBook library if needed, then tap **Resume session** on the host. The current clue and answer visibility are preserved. Re-enable audio on the display; it will not resume playing by itself. Open buzzing explicitly when ready. If a response is unresolved, explicitly resume its paused response timer or judge/dismiss it. After resuming, incorrect judging follows the frozen category policy and activation mode; merely resuming the session does not open buzzing. Finished results need no session resume.
 - Saved-game edits and deletions do not alter an ongoing session: it uses its own copied game definition and retained media IDs.
 
 ## Wi-Fi and macOS troubleshooting
@@ -246,7 +293,7 @@ The UI labels these limits as MB (limits use 1,024² bytes). The server checks s
 | `data/uploads/` | Local media files |
 | `dist/` | Built frontend, regenerated by `npm run build` |
 
-**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential, Final wagers, and response drafts. SQLite migration v5 adds round definitions/answers, Daily Double flags/attempt kinds, and private Final submissions without replacing saved definitions, uploads, sessions, players, or the ledger. Sessions predating scoring initialize at zero with no invented past judgments; Phase 4 scores and ledger entries are preserved; a known accepted winner becomes an unresolved response with its timer paused. Existing snapshots recover with buzzing closed. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
+**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential, Final wagers, and response drafts. SQLite migration v7 adds media attribution; v6 adds category policies and legacy Manual activation defaults; the earlier v5 migration adds round definitions/answers, Daily Double flags/attempt kinds, and private Final submissions without replacing saved definitions, uploads, sessions, players, or the ledger. Sessions predating scoring initialize at zero with no invented past judgments; Phase 4 scores and ledger entries are preserved; a known accepted winner becomes an unresolved response with its timer paused. Existing snapshots recover with buzzing closed. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
 
 Attachments are deliberately retained when removed, replaced, abandoned in an unsaved edit, or associated with a deleted game. Live snapshots and saved definitions may still need them. There is no automatic media cleanup, so disk use can grow. Deleting `data` permanently resets the entire library and active session.
 
@@ -264,14 +311,16 @@ With Node on PATH (or after the local-runtime PATH command):
 npm run build
 npm test
 npm run test:browser
+npm run test:desktop # after npm run package:mac
+npm run test:safari  # requires Safari Allow remote automation
 ```
 
 Tests use temporary data, not your real library. Browser tests use installed Google Chrome at its standard macOS path; set `CHROME_PATH` to another Chrome/Chromium executable if needed. Screenshots go into ignored `artifacts/`. See [VERIFICATION.md](VERIFICATION.md) for actual results and limitations.
 
 Run this checklist with your **MacBook, iPad, and at least two phones**:
 
-1. Create or edit a game with both optional rounds enabled, one first-board Daily Double, up to two Double-board Daily Doubles, and a Final category/clue. Add an image/audio clip to a special clue, preview, save, restart, and confirm the definition persists. Also confirm an old single-board game still starts unchanged.
-2. Start, connect the iPad host and two phones, and enable audio on the MacBook display. Select a Daily Double: confirm the clue is hidden and all phone buzzers are disabled. Choose its player and valid wager, reveal, test timeout/pause/resume, then judge. Incorrect must resolve it without letting the other phone rebuzz.
+1. Create or edit a game with a repeat-attempt category and a one-attempt true/false category on both boards, both optional rounds enabled, one first-board Daily Double, up to two Double-board Daily Doubles, and a Final category/clue. Add an image/audio clip to a special clue, preview, save, restart, and confirm the definition persists. Also confirm an old single-board game still starts unchanged.
+2. First start in Manual mode: confirm clue selection and incorrect judgments keep buzzing closed. Then start a fresh Automatic session, connect the iPad host and two phones, and enable audio on the MacBook display. In the repeat category, answer a $200 clue incorrectly three times with fresh taps, then correctly: confirm −$400, four attempts, automatic reopening, answer/image staying visible, and stopped audio. Return to board. In the one-attempt category, verify first-incorrect exclusion. Manually close buzzing, refresh/reconnect a phone, and confirm it stays closed. Select a Daily Double: confirm the clue is hidden and all phone buzzers are disabled. Choose its player and valid wager, reveal, test timeout/pause/resume, then judge. Incorrect must resolve it without letting the other phone rebuzz.
 3. Advance or confirm skipping to Double Jeopardy. Check the current-round label, carried scores/identities, closed joining, and existing-player reconnection. Exercise the explicit Daily Double setup-correction workflow and inspect compensating history.
 4. Enter Final with positive player scores. Confirm only the category appears. Submit $0/max wagers on the phones and verify neither phone sees the other's wager. Test a host-entered wager with a reason or assign missing wagers to $0 explicitly.
 5. Reveal the Final clue. Check image proportions and host-controlled audio only from the MacBook. Type and save private drafts on both phones, refresh one phone, submit/lock one response early, and let the shared timer expire or explicitly close it early. Check the latest Saved drafts lock and late edits are rejected.
@@ -286,4 +335,13 @@ Saved games, categories, clues, and media keep stable IDs and explicit order. Se
 
 For development, run `npm run dev:server` and `npm run dev` in separate Terminals. Vite proxies `/api` and `/socket.io` (including WebSockets) to Express. Normal startup serves all frontend, API, media, and Socket.IO traffic from one origin.
 
-Phase 5 includes no automatic answer evaluation, tiebreaker, packaging, export/import, external accounts, or cloud deployment. The human host judges spoken responses.
+Phase 6 includes no automatic answer evaluation, tiebreaker, external accounts, paid services, or cloud deployment. The human host judges spoken responses.
+
+## Game-night checklist
+
+1. Launch Jeopardy.app on the MacBook, confirm Connected, select the current Wi-Fi address, and keep the lid open. Allow incoming local connections for Jeopardy if macOS asks; avoid guest-network/client isolation or VPN routes. If no Wi-Fi address appears, connect and refresh. If the address changes, select a current address on the host and share the regenerated links/QR; the app does not silently end the session. Browser credentials are origin-specific, so changing address/port may require the original phone origin or host help.
+2. Open the MacBook display and enable audio. Put only that display on the TV/projector. Copy the **private host link** to the iPad; keep it off the projected screen. Both should show Connected.
+3. Have two phones scan the **public player QR**, enter distinct names, and keep their browser tabs open. Confirm the roster and reconnection behavior. Actual scanning/device Wi-Fi behavior still needs this physical check.
+4. Check image readability and audible audio from only the designated MacBook display. Test Manual activation, then a fresh Automatic session. Manually close/reopen; verify repeated deductions in a repeat category and exclusion in a one-attempt category. Correct must reveal the answer until Return to board; Incorrect must keep it hidden.
+5. Verify scores, a Daily Double's selected player/wager, round progression, private Final wagers/drafts, shared timer, host judgment and chosen reveal order. Confirm unrevealed outcomes stay private and standings appear after all reveals.
+6. Reconnect a phone/iPad; confirm scores and identity. Quit with Command-Q, confirm stopping, and check devices disconnect. Next launch should recover paused with closed buzzers and stopped audio. Do not close the MacBook lid while hosting.

@@ -1,0 +1,13 @@
+import {build} from 'esbuild';
+import {packager} from '@electron/packager';
+import {mkdir,cp,writeFile,rm} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+const stage='build/desktop';await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
+await build({entryPoints:['desktop/backend.ts'],outfile:stage+'/backend.mjs',bundle:true,platform:'node',format:'esm',target:'node24',banner:{js:"import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}});
+await build({entryPoints:['desktop/migration.ts'],outfile:stage+'/migration.cjs',bundle:true,platform:'node',format:'cjs',target:'node24'});
+await cp('desktop/main.cjs',stage+'/main.cjs');await cp('dist',stage+'/dist',{recursive:true});await writeFile(stage+'/package.json',JSON.stringify({name:'jeopardy',productName:'Jeopardy',version:'6.0.0',main:'main.cjs'}));
+for(const file of ['README.md','GAME_FORMAT.md','game-format.schema.json','CHATGPT_GAME_PROMPT.md'])await cp(file,stage+'/'+file);await cp('examples',stage+'/examples',{recursive:true});
+const [output]=await packager({dir:stage,out:'release',name:'Jeopardy',platform:'darwin',arch:'arm64',overwrite:true,asar:false,prune:false,appBundleId:'local.jeopardy.party',appVersion:'6.0.0',extendInfo:{NSLocalNetworkUsageDescription:'Host a local Jeopardy game for your iPad and phones on the same Wi-Fi.'}});
+execFileSync('codesign',['--force','--deep','--sign','-',output+'/Jeopardy.app']);
+execFileSync('ditto',['-c','-k','--sequesterRsrc','--keepParent',output+'/Jeopardy.app','release/Jeopardy-mac-arm64.zip']);
+console.log(output+'/Jeopardy.app');console.log('release/Jeopardy-mac-arm64.zip');

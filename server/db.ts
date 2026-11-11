@@ -8,7 +8,7 @@ export function openStore(directory: string) {
   const db = new DatabaseSync(join(directory, 'games.sqlite'));
   db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
   const version = Number((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version);
-  if (version > 5) throw new Error('This database needs a newer app version.');
+  if (version > 7) throw new Error('This database needs a newer app version.');
   if (version < 1) db.exec(`BEGIN;
     CREATE TABLE games (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, updated_at TEXT NOT NULL, sample INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL);
     CREATE TABLE media (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, filename TEXT NOT NULL UNIQUE);
@@ -41,10 +41,23 @@ export function openStore(directory: string) {
         PRAGMA user_version=5;`);db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  if(version<6){
+    db.exec('BEGIN');
+    try{
+      if(!(db.prepare('PRAGMA table_info(categories)').all() as any[]).some(c=>c.name==='attempt_policy'))db.exec("ALTER TABLE categories ADD COLUMN attempt_policy TEXT NOT NULL DEFAULT 'one'");
+      for(const row of db.prepare('SELECT game_id,definition FROM game_rounds').all() as {game_id:string;definition:string}[]){const definition=JSON.parse(row.definition);for(const c of definition.doubleJeopardy?.categories||[])c.attemptPolicy??='one';db.prepare('UPDATE game_rounds SET definition=? WHERE game_id=?').run(JSON.stringify(definition),row.game_id);}
+      for(const row of db.prepare('SELECT slot,state FROM live_session').all() as {slot:number;state:string}[]){const s=JSON.parse(row.state);s.buzzerMode??='manual';for(const c of [...s.game.categories,...(s.game.doubleJeopardy?.categories||[])])c.attemptPolicy??='one';db.prepare('UPDATE live_session SET state=? WHERE slot=?').run(JSON.stringify(s),row.slot);}
+      db.exec('PRAGMA user_version=6; COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+  if(version<7){
+    if(!(db.prepare('PRAGMA table_info(media)').all() as any[]).some(c=>c.name==='attribution'))db.exec("ALTER TABLE media ADD COLUMN attribution TEXT NOT NULL DEFAULT ''");
+    db.exec('PRAGMA user_version=7');
+  }
   function get(id:string): Game | undefined {
     const g = db.prepare('SELECT * FROM games WHERE id=?').get(id) as any;
     if (!g) return;
-    const categories = (db.prepare('SELECT * FROM categories WHERE game_id=? ORDER BY position').all(id) as any[]).map(c => ({id:c.id, order:c.position, name:c.name, clues:(db.prepare('SELECT c.*, a.answer FROM clues c JOIN answers a ON a.clue_id=c.id WHERE category_id=? ORDER BY position').all(c.id) as any[]).map(q => ({id:q.id, order:q.position, value:q.value, text:q.text, answer:q.answer, imageId:q.image_id, audioId:q.audio_id,...(q.daily_double?{dailyDouble:true}:{})}))}));
+    const categories = (db.prepare('SELECT * FROM categories WHERE game_id=? ORDER BY position').all(id) as any[]).map(c => ({id:c.id, order:c.position, name:c.name, attemptPolicy:c.attempt_policy||'one', clues:(db.prepare('SELECT c.*, a.answer FROM clues c JOIN answers a ON a.clue_id=c.id WHERE category_id=? ORDER BY position').all(c.id) as any[]).map(q => ({id:q.id, order:q.position, value:q.value, text:q.text, answer:q.answer, imageId:q.image_id, audioId:q.audio_id,...(q.daily_double?{dailyDouble:true}:{})}))}));
     const optionRow=db.prepare('SELECT definition FROM game_rounds WHERE game_id=?').get(id) as {definition:string}|undefined;
     const options=optionRow?JSON.parse(optionRow.definition):{};
     const answers=new Map((db.prepare('SELECT clue_id,answer FROM round_answers WHERE game_id=?').all(id) as {clue_id:string;answer:string}[]).map(r=>[r.clue_id,r.answer]));
@@ -52,8 +65,8 @@ export function openStore(directory: string) {
     if(options.finalJeopardy)options.finalJeopardy.clue.answer=answers.get(options.finalJeopardy.clue.id)||'';
     return {...options,id:g.id,title:g.title,description:g.description,updatedAt:g.updated_at,sample:Boolean(g.sample),revision:g.revision,categories};
   }
-  function write(game:Game, create=false) {
-    db.exec('BEGIN IMMEDIATE');
+  function write(game:Game, create=false, insideTransaction=false) {
+    if(!insideTransaction)db.exec('BEGIN IMMEDIATE');
     try {
       if (create) db.prepare('INSERT INTO games VALUES (?, ?, ?, ?, ?, ?)').run(game.id,game.title,game.description,game.updatedAt,Number(game.sample),game.revision);
       else {
@@ -62,7 +75,7 @@ export function openStore(directory: string) {
         db.prepare('DELETE FROM categories WHERE game_id=?').run(game.id);
       }
       for (const c of game.categories) {
-        db.prepare('INSERT INTO categories VALUES (?, ?, ?, ?)').run(c.id,game.id,c.order,c.name);
+        db.prepare('INSERT INTO categories VALUES (?, ?, ?, ?, ?)').run(c.id,game.id,c.order,c.name,c.attemptPolicy||'one');
         for (const q of c.clues) {
           for (const [mediaId, kind] of [[q.imageId,'image'],[q.audioId,'audio']]) if (mediaId && !(db.prepare('SELECT id FROM media WHERE id=? AND kind=?').get(mediaId,kind))) throw Object.assign(new Error(`The selected ${kind} attachment does not exist.`), {status:400});
           db.prepare('INSERT INTO clues VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(q.id,c.id,q.order,q.value,q.text,q.imageId,q.audioId,Number(Boolean(q.dailyDouble)));
@@ -77,8 +90,8 @@ export function openStore(directory: string) {
         db.prepare('INSERT INTO round_answers VALUES (?,?,?)').run(q.id,game.id,q.answer);delete q.answer;
       }
       db.prepare('INSERT OR REPLACE INTO game_rounds VALUES (?,?)').run(game.id,JSON.stringify(options));
-      db.exec('COMMIT');
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
+      if(!insideTransaction)db.exec('COMMIT');
+    } catch (error) { if(!insideTransaction)db.exec('ROLLBACK'); throw error; }
     return get(game.id)!;
   }
   function create(title:string, description='', sample=false) {
@@ -100,5 +113,5 @@ export function openStore(directory: string) {
     game.categories.forEach((c,i) => {c.name=samples[i*5][0]; c.clues.forEach((q,j) => {q.text=samples[i*5+j][1];q.answer=samples[i*5+j][2];});});
     write(game);
   }
-  return { db, get, write, create, list, remove:(id:string)=>db.prepare('DELETE FROM games WHERE id=?').run(id), media:(id:string)=>db.prepare('SELECT * FROM media WHERE id=?').get(id) as (Media & {filename:string}) | undefined };
+  return { db, get, write, create, list, remove:(id:string)=>db.prepare('DELETE FROM games WHERE id=?').run(id), media:(id:string)=>db.prepare('SELECT * FROM media WHERE id=?').get(id) as (Media & {filename:string;attribution:string}) | undefined };
 }

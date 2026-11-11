@@ -1,0 +1,56 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {mkdtemp,rm,readFile,readdir,writeFile} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {once} from 'node:events';
+import {createApp} from '../server/app.js';import {unzip,zipFiles} from '../server/transfer.js';import {migrateLibrary,backupBeforeUpgrade} from '../desktop/migration.js';import {lockData} from '../server/storage.js';import {emptyCategories} from '../shared/model.js';import {DatabaseSync} from 'node:sqlite';
+async function fixture(){const dir=await mkdtemp(join(tmpdir(),'jeopardy-transfer-'));const app=createApp(dir);return {...app,dir,cleanup:async()=>{await new Promise<void>(r=>app.live.io.close(()=>r()));app.store.db.close();await rm(dir,{recursive:true,force:true});}};}
+
+test('actual JSON and media ZIP examples import, duplicate safely, round-trip policies/media and preserve private session',async()=>{
+ const f=await fixture();try{
+  const original=f.store.get(f.store.list()[0].id)!;f.live.start(original.id,10,'automatic');const sid=f.live.setup(3000).session!.id,host=f.live.setup(3000).hostToken;
+  for(const [path,kind] of [['examples/text-only.json','json'],['examples/image-audio.zip','zip']] as const){const preview=await f.transfer.preview(await readFile(path),kind);assert.equal(preview.clueCount,30);assert.equal(preview.mediaCount,kind==='zip'?2:0);assert.deepEqual(preview.warnings,[]);const first=await f.transfer.commit(preview.token);assert.equal(first.categories[0].attemptPolicy,'repeat');assert.equal(first.categories[1].attemptPolicy,'one');assert.notEqual(first.id,original.id);if(kind==='zip'){first.categories[0].clues[0].dailyDouble=true;first.doubleJeopardy={enabled:false,categories:emptyCategories(400)};first.doubleJeopardy.categories[1].attemptPolicy='one';first.doubleJeopardy.categories[0].clues[0].dailyDouble=true;first.doubleJeopardy.categories[0].clues[1].dailyDouble=true;first.finalJeopardy={enabled:true,category:'Final preserved',clue:{id:crypto.randomUUID(),order:0,value:0,text:'Name this tone',answer:'A tone',imageId:null,audioId:first.categories[5].clues[0].audioId}};f.store.write(first);}
+   const bytes=await f.transfer.exportGame(first.id,kind);const again=await f.transfer.commit((await f.transfer.preview(bytes,kind)).token);assert.equal(again.title,first.title);assert.notEqual(again.id,first.id);assert.notEqual(again.categories[0].clues[0].id,first.categories[0].clues[0].id);
+   if(kind==='zip'){assert.equal(again.doubleJeopardy!.enabled,false);assert.equal(again.doubleJeopardy!.categories[1].attemptPolicy,'one');assert.equal(again.doubleJeopardy!.categories[0].clues[1].dailyDouble,true);assert.equal(again.finalJeopardy!.category,'Final preserved');assert.equal(again.finalJeopardy!.enabled,true);assert.ok(again.finalJeopardy!.clue.audioId);assert.notEqual(again.categories[4].clues[0].imageId,first.categories[4].clues[0].imageId);await assert.rejects(()=>f.transfer.exportGame(first.id,'json'),/ZIP/);const files=await unzip(bytes);assert.equal(files.size,3);assert.ok(!files.has('session.json'));assert.ok(!bytes.includes(Buffer.from(host!)));const manifest=JSON.parse(files.get('manifest.json')!.toString());assert.equal(manifest.media[0].attribution.includes('CC0'),true);const media=f.store.media(first.categories[4].clues[0].imageId!)!;assert.deepEqual(await readFile(join(f.dir,'uploads',media.filename)),files.get(manifest.game.categories[4].clues[0].image));}
+  }
+  assert.equal(f.live.setup(3000).session!.id,sid);assert.equal(f.live.setup(3000).hostToken,host);assert.deepEqual(f.store.get(original.id),original);
+ }finally{await f.cleanup();}
+});
+
+test('untrusted formats, drafts, limits, missing media and failed commit leave existing data unchanged',async()=>{
+ const f=await fixture();try{
+  const text=JSON.parse((await readFile('examples/text-only.json')).toString());
+  for(const patch of [{version:2},{session:{hostToken:'secret'}},{game:{...text.game,categories:[]}},{game:{...text.game,categories:text.game.categories.map((c:any,i:number)=>({...c,attemptPolicy:i?'one':'invalid'}))}}])await assert.rejects(()=>f.transfer.preview(Buffer.from(JSON.stringify({...text,...patch})),'json'));
+  await assert.rejects(()=>f.transfer.preview(Buffer.from('not json'),'json'),/JSON/);await assert.rejects(()=>f.transfer.preview(Buffer.from('not zip'),'zip'),/ZIP/);await assert.rejects(()=>f.transfer.preview(Buffer.alloc(2*1024*1024+1),'json'),/limit/);await assert.rejects(()=>f.transfer.preview(Buffer.alloc(64*1024*1024+1),'zip'),/limit/);
+ }finally{await f.cleanup();}
+});
+
+test('ZIP validation rejects unsupported entries, duplicate paths, symlinks, missing media and signature mismatch; rollback removes copied files',async()=>{
+ const f=await fixture();try{
+  const files=await unzip(await readFile('examples/image-audio.zip'));let bad=new Map(files);bad.delete('media/colors.png');
+  await assert.rejects(async()=>f.transfer.preview(await zipFiles(bad),'zip'),/Missing/);
+  bad=new Map(files);bad.set('media/colors.png',Buffer.from('fake image'));await assert.rejects(async()=>f.transfer.preview(await zipFiles(bad),'zip'),/contents/);
+  bad=new Map(files);bad.set('evil.exe',Buffer.from('x'));await assert.rejects(async()=>f.transfer.preview(await zipFiles(bad),'zip'),/path/);
+  // Patch safe equal-length central/local names to malicious traversal; no extraction is performed.
+  const safe=await zipFiles(new Map([['media/aa.png',Buffer.from('x')]]));for(const name of ['../evil.png','/tmp/aa.png']){const buffer=Buffer.from(safe);let at=0;while((at=buffer.indexOf('media/aa.png',at))>=0){buffer.write(name.padEnd(12,'x').slice(0,12),at);at+=12;}await assert.rejects(()=>unzip(buffer));}
+  const dup=await zipFiles(new Map([['media/aa.png',Buffer.from('x')],['media/bb.png',Buffer.from('x')]]));let at=0;while((at=dup.indexOf('media/bb.png',at))>=0){dup.write('media/aa.png',at);at+=12;}await assert.rejects(()=>unzip(dup),/Duplicate/);
+  const symlink=Buffer.from(safe);const central=symlink.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));symlink.writeUInt32LE((0xa1ff<<16)>>>0,central+38);await assert.rejects(()=>unzip(symlink),/Symlink/);
+  const oversized=Buffer.from(safe);oversized.writeUInt32LE(21*1024*1024,central+24);await assert.rejects(()=>unzip(oversized),/limit/);
+  await assert.rejects(async()=>unzip(await zipFiles(new Map(Array.from({length:131},(_,i)=>[`media/file${i}.png`,Buffer.from('x')])))),/many entries/);
+  const manifestLarge=await zipFiles(new Map([['manifest.json',Buffer.alloc(2*1024*1024+1)]]));await assert.rejects(()=>unzip(manifestLarge),/limit/);
+  const existing=await f.transfer.commit((await f.transfer.preview(await readFile('examples/image-audio.zip'),'zip')).token);
+  const before=f.store.list().length,uploaded=await readdir(join(f.dir,'uploads'));const preview=await f.transfer.preview(await readFile('examples/image-audio.zip'),'zip');f.store.db.exec("CREATE TRIGGER reject_import BEFORE INSERT ON games BEGIN SELECT RAISE(ABORT,'injected commit failure'); END");await assert.rejects(()=>f.transfer.commit(preview.token),/injected/);assert.equal(f.store.list().length,before);assert.deepEqual(await readdir(join(f.dir,'uploads')),uploaded);assert.equal((f.store.db.prepare('SELECT count(*) n FROM media').get() as any).n,2);assert.deepEqual(f.store.get(existing.id),existing);f.store.db.exec('DROP TRIGGER reject_import');
+  const text=JSON.parse((await readFile('examples/text-only.json')).toString());text.game.categories[0].clues[0].answer='';const draft=await f.transfer.preview(Buffer.from(JSON.stringify(text)),'json');assert.equal(draft.warnings.length,1);const imported=await f.transfer.commit(draft.token);assert.equal(imported.categories[0].clues[0].answer,'');assert.throws(()=>f.live.start(imported.id),/draft/);
+  const p=await f.transfer.preview(await readFile('examples/image-audio.zip'),'zip');const g=await f.transfer.commit(p.token);const m=f.store.media(g.categories[4].clues[0].imageId!)!;await rm(join(f.dir,'uploads',m.filename));await assert.rejects(()=>f.transfer.exportGame(g.id,'zip'),/Missing attachment file/);
+ }finally{await f.cleanup();}
+});
+
+test('consistent SQLite migration keeps original and backup, validates games/media, never overwrites, and storage lock prevents concurrent hosting',async()=>{
+ const f=await fixture(),root=await mkdtemp(join(tmpdir(),'jeopardy-migrate-'));try{
+  const p=await f.transfer.preview(await readFile('examples/image-audio.zip'),'zip');const game=await f.transfer.commit(p.token);f.live.start(game.id);const token=f.live.setup(3000).hostToken;const dest=join(root,'installed');const result=await migrateLibrary(f.dir,dest);assert.equal(result.games,2);const {openStore}=await import('../server/db.js');const copy=openStore(dest);try{assert.deepEqual(copy.get(game.id),game);assert.equal((copy.db.prepare('SELECT host_token FROM live_session').get() as any).host_token,token);for(const m of copy.db.prepare('SELECT filename FROM media').all() as {filename:string}[])assert.deepEqual(await readFile(join(dest,'uploads',m.filename)),await readFile(join(f.dir,'uploads',m.filename)));}finally{copy.db.close();}assert.equal(f.store.get(game.id)!.id,game.id);assert.ok((await readFile(join(result.backupDir,'games.sqlite'))).length);await assert.rejects(()=>migrateLibrary(f.dir,dest),/already/);
+  f.store.db.exec('PRAGMA user_version=6');const pre=await backupBeforeUpgrade(f.dir);assert.ok(pre);const snap=new DatabaseSync(join(pre!,'games.sqlite'),{readOnly:true});assert.equal((snap.prepare('PRAGMA user_version').get() as any).user_version,6);assert.equal((snap.prepare('SELECT count(*) n FROM games').get() as any).n,2);snap.close();f.store.db.exec('PRAGMA user_version=7');assert.equal(await backupBeforeUpgrade(f.dir),undefined);
+  const release=lockData(join(root,'locked'));assert.throws(()=>lockData(join(root,'locked')),/already/);release();const second=lockData(join(root,'locked'));second();
+ }finally{await f.cleanup();await rm(root,{recursive:true,force:true});}
+});
+
+test('transfer HTTP management is local-only, preview requires confirmation, and malformed requests fail clearly',async()=>{
+ const f=await fixture();f.server.listen(0,'0.0.0.0');await once(f.server,'listening');try{const port=(f.server.address() as any).port,root=`http://127.0.0.1:${port}`;const form=new FormData();form.append('file',new Blob([new Uint8Array(await readFile('examples/text-only.json'))]),'game.json');const p=await(await fetch(root+'/api/transfer/preview',{method:'POST',body:form})).json();assert.ok(p.token);assert.equal(f.store.list().length,1);const response=await fetch(root+'/api/transfer/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:p.token})});assert.equal(response.status,201);const {networkInterfaces}=await import('node:os');const lan=Object.values(networkInterfaces()).flat().find(i=>i?.family==='IPv4'&&!i.internal);if(lan){assert.equal((await fetch(`http://${lan.address}:${port}/api/transfer/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:p.token})})).status,403);assert.equal((await fetch(`http://${lan.address}:${port}/api/games/${f.store.list()[0].id}/export?format=json`)).status,403);}}
+ finally{await f.cleanup();}
+});

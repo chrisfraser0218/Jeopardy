@@ -1,6 +1,10 @@
+import { lockData,developmentDirectory } from './storage.js';
 import { createApp } from './app.js';
 import { networkOrigins } from './live.js';
-const {server,store,live}=createApp(process.env.DATA_DIR);
+const directory=developmentDirectory();
+const release=lockData(directory);
+const {server,store,live}=createApp(directory);
+process.on('exit',release);
 const port=Number(process.env.PORT || 3000);
 server.listen(port,process.env.HOST || '0.0.0.0',()=>{
   const actualPort=(server.address() as {port:number}).port;

@@ -29,7 +29,7 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
   const row=store.db.prepare('SELECT * FROM live_session WHERE slot=1').get() as {state:string;host_token:string;commands:string}|undefined;
   if(row){
     session=JSON.parse(row.state);hostToken=row.host_token;commands=JSON.parse(row.commands);
-    session!.joiningOpen ??= true;session!.showJoinQr ??= true;session!.joinOrigin ??= null;session!.buzzer ??= emptyBuzzer(session!.currentClueId);
+    session!.buzzerMode ??= 'manual';session!.joiningOpen ??= true;session!.showJoinQr ??= true;session!.joinOrigin ??= null;session!.buzzer ??= emptyBuzzer(session!.currentClueId);
     if(session!.timerSeconds===undefined)session!.timerSeconds=10;
     session!.round ??= 'first';session!.dailyDouble ??= null;session!.final ??= null;session!.currentAttemptId ??= null;session!.finished ??= false;session!.results ??= null;
     session!.buzzer.open=false;session!.buzzer.windowId=null;session!.paused=!session!.finished;session!.revision++;
@@ -52,11 +52,11 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
   // Public transport is built field by field: unrevealed answers never enter a public packet.
   function publicSession():PublicSession|null {
     if(!session)return null;
-    const {id,revision,currentClueId,revealed,completed,paused,joiningOpen,showJoinQr,joinOrigin,buzzer,timerSeconds,currentAttemptId,finished,results,round}=session;
+    const {id,revision,currentClueId,revealed,completed,paused,joiningOpen,showJoinQr,joinOrigin,buzzer,timerSeconds,buzzerMode,currentAttemptId,finished,results,round}=session;
     const presentation=currentDefinition(session),visible=Boolean(presentation&&(!session.dailyDouble||session.dailyDouble.revealed)&&(round!=='final'||session.final?.phase!=='wagering'));
     const dailyDouble=session.dailyDouble?{clueId:session.dailyDouble.clueId,playerId:session.dailyDouble.playerId,wager:session.dailyDouble.wager,revealed:session.dailyDouble.revealed}:null;
     const project=(q:import('../shared/model.js').Clue)=>({id:q.id,order:q.order,value:q.value,text:visible&&q.id===currentClueId?q.text:'',imageId:visible&&q.id===currentClueId?q.imageId:null,audioId:visible&&q.id===currentClueId?q.audioId:null,...(revealed&&q.id===currentClueId?{answer:q.answer}:{})});
-    return {id,revision,currentClueId,revealed,timerSeconds,currentAttemptId,finished,round,dailyDouble,final:structuredClone(session.final),results:structuredClone(results),completed:[...completed],paused,joiningOpen,showJoinQr,joinOrigin:joinOrigin&&joinOrigins().includes(joinOrigin)?joinOrigin:null,buzzer:structuredClone(buzzer),game:{title:session.game.title,categories:round==='final'?(visible?[{id:'final',order:0,name:session.game.finalJeopardy!.category,clues:[project(presentation!)]}]:[]):boardCategories(session).map(c=>({id:c.id,order:c.order,name:c.name,clues:c.clues.map(project)}))}};
+    return {id,revision,currentClueId,revealed,timerSeconds,buzzerMode,currentAttemptId,finished,round,dailyDouble,final:structuredClone(session.final),results:structuredClone(results),completed:[...completed],paused,joiningOpen,showJoinQr,joinOrigin:joinOrigin&&joinOrigins().includes(joinOrigin)?joinOrigin:null,buzzer:structuredClone(buzzer),game:{title:session.game.title,categories:round==='final'?(visible?[{id:'final',order:0,name:session.game.finalJeopardy!.category,attemptPolicy:'one' as const,clues:[project(presentation!)]}]:[]):boardCategories(session).map(c=>({id:c.id,order:c.order,name:c.name,attemptPolicy:c.attemptPolicy,clues:c.clues.map(project)}))}};
 
   }
   function authorized(token:unknown) {
@@ -83,7 +83,7 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
     next();
   });
   function state(privateView=false){
-    const hostSession=session?{...session,game:{...session.game,categories:session.round==='final'?[{id:'final',order:0,name:session.game.finalJeopardy!.category,clues:[session.game.finalJeopardy!.clue]}]:boardCategories(session)}}:null;
+    const hostSession=session?{...session,game:{...session.game,categories:session.round==='final'?[{id:'final',order:0,name:session.game.finalJeopardy!.category,attemptPolicy:'one' as const,clues:[session.game.finalJeopardy!.clue]}]:boardCategories(session)}}:null;
     return {session:privateView?hostSession:publicSession(),audio:{...audio},players:players.roster(),attempt:scoring.current(),serverNow:now(),progress:session?boardProgress(session):{resolved:0,total:0,hasNext:false},final:rounds.publicFinal(),...(privateView?{joinOrigins:joinOrigins(),ledger:scoring.ledger(),attempts:scoring.attempts(),allPlayers:players.allPlayers(),finalSubmissions:rounds.privateFinal(),dailyDoubleLimits:session?.dailyDouble?Object.fromEntries(players.roster().map(p=>[p.id,rounds.maxDaily(p.id)])):undefined}:{})};
   }
   function broadcast(){io.to('display').emit('state',state());io.to('host').emit('state',state(true));players.publish();}
@@ -92,7 +92,8 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
     audio={...audio,playback:'stopped',error:null,...(release?{ownerId:null,ready:false}:{})};
   }
   function setup(port:number):Setup{return {session:session?{id:session.id,title:session.game.title,paused:session.paused,completed:session.completed.length,finished:session.finished}:null,hostToken,origins:networkOrigins(port)};}
-  function start(gameId:string,timerSeconds:number|null=10){
+  function start(gameId:string,timerSeconds:number|null=10,buzzerMode:'manual'|'automatic'='manual'){
+    if(!['manual','automatic'].includes(buzzerMode))fail('Choose Manual or Automatic buzzer activation.');
     if(timerSeconds!==null&&(!Number.isInteger(timerSeconds)||timerSeconds<1||timerSeconds>120))fail('Choose a response timer from 1 to 120 seconds, or disable it.');
     if(session&&!session.finished)fail('A session is already active. Resume or end it before starting a new one.',409);
     const game=store.get(gameId);if(!game)fail('Game not found.',404);
@@ -108,7 +109,7 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
     if(missing.length)fail(`This draft cannot start. ${missing.join(' ')}`);
     transaction(()=>{
     if(session){afterCommit(()=>players.end());const ids=[...(io.sockets.adapter.rooms.get('host')||[])];afterCommit(()=>{for(const id of ids){const socket=io.sockets.sockets.get(id);socket?.leave('host');socket?.disconnect(true);}});}
-    session={id:crypto.randomUUID(),game:structuredClone(game),revision:1,currentClueId:null,revealed:false,completed:[],paused:false,joiningOpen:true,showJoinQr:true,joinOrigin:joinOrigins()[0]||null,buzzer:emptyBuzzer(),timerSeconds,currentAttemptId:null,finished:false,results:null,round:'first',dailyDouble:null,final:null};
+    session={id:crypto.randomUUID(),game:structuredClone(game),revision:1,currentClueId:null,revealed:false,completed:[],paused:false,joiningOpen:true,showJoinQr:true,joinOrigin:joinOrigins()[0]||null,buzzer:emptyBuzzer(),timerSeconds,buzzerMode,currentAttemptId:null,finished:false,results:null,round:'first',dailyDouble:null,final:null};
     hostToken=randomBytes(32).toString('base64url');commands=[];stopAudio(true);});broadcast();return session!.id;
   }
   function action(input:unknown) {
@@ -133,6 +134,7 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
       scoring.dismiss('Clue changed');session!.currentAttemptId=null;
       session!.buzzer={...emptyBuzzer(clue.id),excludedIds:session!.buzzer.clueId===clue.id?session!.buzzer.excludedIds:[]};
       stopAudio();session!.currentClueId=clue.id;session!.revealed=false;session!.completed=session!.completed.filter(id=>id!==clue.id);session!.dailyDouble=null;rounds.announceDaily();
+      if(session!.buzzerMode==='automatic'&&!session!.dailyDouble)players.openWindow(session!);
     } else if(a.type==='reveal') {
       if(session!.dailyDouble&&!session!.dailyDouble.revealed)fail('Confirm the Daily Double player and wager before revealing the clue.');
       if(!current||session!.revealed)fail('Select a hidden clue before revealing its answer.');
@@ -153,7 +155,9 @@ export function attachLive(store:ReturnType<typeof openStore>, server:HttpServer
     } else if(rounds.hostAction(a)) {
       if(['advance-round','skip-round'].includes(a.type))stopAudio();
     } else if(scoring.hostAction(a)) {
-      // Judgment, timer, and ledger mutation share this transaction with session progress.
+      // Judgment, eligibility, fresh window, and display changes commit together.
+      if(a.type==='judge-correct')stopAudio();
+      if(a.type==='judge-incorrect'&&session!.buzzerMode==='automatic'&&!session!.dailyDouble&&!session!.revealed&&!session!.completed.includes(session!.currentClueId!))players.openWindow(session!);
     } else if(players.hostAction(a)) {
       // Validated roster, joining, or buzzer control.
     } else if(a.type==='play'||a.type==='pause'||a.type==='replay') {

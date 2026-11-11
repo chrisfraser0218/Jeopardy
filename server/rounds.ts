@@ -64,7 +64,7 @@ export function roundService(store:ReturnType<typeof openStore>,get:()=>LiveSess
         const playerId=validateDaily(a.playerId,a.amount),old=score.current()!;
         if(old.status==='correct'||old.status==='incorrect')score.hostAction({...a,type:'judgment-correct',outcome:'dismissed'});
         else{score.dismiss(a.reason);score.add(old.playerId,0,'correction',a.reason,old);}
-        s.completed=s.completed.filter(id=>id!==s.currentClueId);dd.playerId=playerId;dd.wager=a.amount!;s.buzzer.winnerId=playerId;
+        s.revealed=false;s.completed=s.completed.filter(id=>id!==s.currentClueId);dd.playerId=playerId;dd.wager=a.amount!;s.buzzer.winnerId=playerId;
         score.accept(playerId,{value:a.amount!,kind:'daily-double',paused:true});
       }return true;
     }

@@ -8,6 +8,7 @@ import { gameInput } from '../shared/model.js';
 import { openStore } from './db.js';
 import { createServer } from 'node:http';
 import { attachLive } from './live.js';
+import { transferService } from './transfer.js';
 import { localOnly, localRequest, sameOrigin } from './access.js';
 
 export function createApp(directory=resolve('data'), options:{now?:()=>number}={}) {
@@ -15,6 +16,7 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
   const app=express();
   const server=createServer(app);
   const live=attachLive(store,server,options.now);
+  const transfer=transferService(store,directory);
   app.disable('x-powered-by');
   app.use((_req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');next();});
   // Same-origin writes also block cross-site form submissions to this local service.
@@ -25,7 +27,7 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
   });
   app.use(express.json({limit:'8mb'}));
   app.get('/api/live/setup',localOnly,(req,res)=>res.json(live.setup(req.socket.localPort!)));
-  app.post('/api/live/start',localOnly,(req,res)=>{const {gameId,timerSeconds}=z.object({gameId:z.uuid(),timerSeconds:z.number().int().min(1).max(120).nullable().default(10)}).parse(req.body);live.start(gameId,timerSeconds);res.status(201).json(live.setup(req.socket.localPort!));});
+  app.post('/api/live/start',localOnly,(req,res)=>{const {gameId,timerSeconds,buzzerMode}=z.object({buzzerMode:z.enum(['manual','automatic']).default('manual'),gameId:z.uuid(),timerSeconds:z.number().int().min(1).max(120).nullable().default(10)}).parse(req.body);live.start(gameId,timerSeconds,buzzerMode);res.status(201).json(live.setup(req.socket.localPort!));});
   app.post('/api/live/end',localOnly,(req,res)=>{if(!live.authorized(req.get('authorization')?.replace(/^Bearer /,'')))return res.status(401).json({error:'A valid host credential is required to end the game.'});live.endLocal();res.status(204).end();});
   app.get('/api/live',(_req,res)=>res.json(live.publicState()));
   app.get('/api/live/host',(req,res)=>{
@@ -34,7 +36,13 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
   });
   app.post('/api/player/join',(req,res)=>res.status(201).json(live.players.join(req.body)));
   app.get('/api/player/session/:id',(req,res)=>res.json(live.players.view(req.params.id)));
+  app.use('/api/transfer',localOnly);
+  const importUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:64*1024*1024,files:1,fields:0}}).single('file');
+  app.post('/api/transfer/preview',(req,res,next)=>importUpload(req,res,error=>{if(error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE')return res.status(413).json({error:'Game import files must be 64 MB or smaller (JSON manifests: 2 MB).'});next(error);}),async(req,res)=>{if(!req.file)throw Object.assign(Error('Choose a JSON or ZIP game file.'),{status:400});const ext=extname(req.file.originalname).toLowerCase();if(!['.json','.zip'].includes(ext))throw Object.assign(Error('Choose a .json or .zip game file.'),{status:400});res.json(await transfer.preview(req.file.buffer,ext==='.zip'?'zip':'json'));});
+  app.post('/api/transfer/commit',async(req,res)=>{const {token}=z.object({token:z.uuid()}).strict().parse(req.body);res.status(201).json(await transfer.commit(token));});
+  app.delete('/api/transfer/:token',(req,res)=>{transfer.cancel(req.params.token);res.status(204).end();});
   app.use('/api/games',localOnly);
+  app.get('/api/games/:id/export',async(req,res)=>{const format=z.enum(['json','zip']).parse(req.query.format);const data=await transfer.exportGame(req.params.id,format);res.setHeader('Content-Type',format==='zip'?'application/zip':'application/json');res.setHeader('Content-Disposition',`attachment; filename="jeopardy-game.${format}"`);res.send(data);});
   app.post('/api/media',localOnly);
   app.get('/api/games',(_req,res)=>res.json(store.list()));
   app.post('/api/games',(req,res)=>{const p=z.object({title:z.string().trim().min(1).max(200),description:z.string().max(2000).default('')}).parse(req.body);res.status(201).json(store.create(p.title,p.description));});
@@ -55,7 +63,7 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
     const id=crypto.randomUUID(), filename=`${id}.${type.ext}`;
     await writeFile(join(directory,'uploads',filename),f.buffer,{flag:'wx'});
     const media={id,kind:format.kind,name:f.originalname.slice(0,255),mime:type.mime,size:f.size};
-    try {store.db.prepare('INSERT INTO media VALUES (?, ?, ?, ?, ?, ?)').run(id,media.kind,media.name,media.mime,media.size,filename);} catch(error){await unlink(join(directory,'uploads',filename));throw error;}
+    try {store.db.prepare('INSERT INTO media (id,kind,name,mime,size,filename) VALUES (?, ?, ?, ?, ?, ?)').run(id,media.kind,media.name,media.mime,media.size,filename);} catch(error){await unlink(join(directory,'uploads',filename));throw error;}
     res.status(201).json(media);
   });
   app.get('/api/media/:id',(req,res)=>{if(!localRequest(req)&&!live.currentMedia(req.params.id))return res.status(403).json({error:'This media is not part of the active session.'});const m=store.media(req.params.id);if(!m)return res.status(404).json({error:'Attachment not found.'});res.setHeader('Content-Type',m.mime);res.setHeader('Cache-Control','private, no-store');res.sendFile(resolve(directory,'uploads',m.filename));});
@@ -70,5 +78,5 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
     if(status===500)console.error(error);
     res.status(status).json({error:status===500?'Could not complete the request. Check the server terminal and try again.':error.message});
   });
-  return {app,store,server,live};
+  return {app,store,server,live,transfer};
 }

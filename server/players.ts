@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import { z } from 'zod';
+import { currentPolicy } from '../shared/rounds.js';
 import type { BuzzerState, HostAction, LiveSession, PlayerIdentity, PlayerPublic, PlayerState } from '../shared/live.js';
 import type { openStore } from './db.js';
 import type { roundService } from './rounds.js';
@@ -34,7 +35,7 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
   function view(sessionId:string,socket?:Socket):PlayerState{
     const session=getSession();if(!session||session.id!==sessionId)fail('This session ended or expired. Scan the current game QR code.',404);
     const players=roster(),self=players.find(p=>p.id===socket?.data.playerId)||null;
-    return {sessionId:session.id,title:session.game.title,paused:session.paused,joiningOpen:session.joiningOpen,currentClueId:session.currentClueId,revealed:session.revealed,buzzer:structuredClone(session.buzzer),players,self,activeTab:Boolean(self&&active(self.id)===socket?.id),finished:session.finished,results:session.results,attempt:scoring.current(),serverNow:now(),round:session.round,dailyDouble:session.dailyDouble?{clueId:session.dailyDouble.clueId,playerId:session.dailyDouble.playerId,wager:session.dailyDouble.wager,revealed:session.dailyDouble.revealed}:null,final:rounds.publicFinal(),finalOwn:rounds.own(socket?.data.playerId)};
+    return {attemptPolicy:currentPolicy(session),ownAttemptCount:scoring.attempts().filter(a=>a.clueId===session.currentClueId&&a.playerId===self?.id).length,buzzerMode:session.buzzerMode||'manual',sessionId:session.id,title:session.game.title,paused:session.paused,joiningOpen:session.joiningOpen,currentClueId:session.currentClueId,revealed:session.revealed,buzzer:structuredClone(session.buzzer),players,self,activeTab:Boolean(self&&active(self.id)===socket?.id),finished:session.finished,results:session.results,attempt:scoring.current(),serverNow:now(),round:session.round,dailyDouble:session.dailyDouble?{clueId:session.dailyDouble.clueId,playerId:session.dailyDouble.playerId,wager:session.dailyDouble.wager,revealed:session.dailyDouble.revealed}:null,final:rounds.publicFinal(),finalOwn:rounds.own(socket?.data.playerId)};
   }
   function publish(){
     const session=getSession();if(!session)return;
@@ -126,5 +127,5 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
     for(const socket of io.sockets.sockets.values())if(socket.data.role==='player'){socket.emit('player:invalid',{error:'This session ended. Scan the QR code for the next game.'});socket.disconnect(true);}
     tabs.clear(); // Historical players and ledger entries are retained across fresh sessions.
   }
-  return {roster,allPlayers,authenticate,view,publish,join,hostAction,register,end};
+  return {openWindow,roster,allPlayers,authenticate,view,publish,join,hostAction,register,end};
 }

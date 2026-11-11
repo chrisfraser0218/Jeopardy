@@ -1,6 +1,6 @@
 {
   "name": "blueboard-local",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,7 +13,11 @@
     "start": "node --import tsx server/index.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "check": "npm run build && npm test",
-    "test:browser": "node --import tsx --test tests/browser.ts tests/live-browser.ts tests/players-browser.ts tests/scoring-browser.ts tests/rounds-browser.ts"
+    "test:browser": "node --import tsx --test tests/browser.ts tests/live-browser.ts tests/players-browser.ts tests/scoring-browser.ts tests/rounds-browser.ts tests/buzzer-policy-browser.ts",
+    "package:mac": "npm run build && node scripts/package.mjs",
+    "test:desktop": "node --import tsx --test tests/desktop.ts",
+    "examples": "node --import tsx scripts/examples.ts",
+    "test:safari": "node --import tsx --test tests/safari.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -25,19 +29,30 @@
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
     "tsx": "^4.20.6",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@types/express": "^5.0.5",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.10.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^45.3.0",
+    "esbuild": "^0.28.2",
     "jsqr": "^1.4.0",
     "playwright": "^1.65.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.2"
+  },
+  "overrides": {
+    "glob": "^14.0.4",
+    "minimatch": "^11.0.8"
   }
 }
