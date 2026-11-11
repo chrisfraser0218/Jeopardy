@@ -5,10 +5,18 @@ Completed November 11, 2026 on macOS arm64, Node.js 24.11.0, and installed Googl
 ## Completed checks
 
 - `npm run check` passed TypeScript/Vite build and **26 API/migration/restart tests**.
-- `npm run test:browser` passed **7 Chrome workflows**: editor/media; independent host/display/audio; QR/independent phone buzzers; a complete standard-game scoring/timer/results workflow; optional-round editing/media; a multiround Daily Double/Final game; and Automatic repeated attempts with editor policies, answer reveal, and audio stop.
+- `npm run test:browser` passed **8 Chrome workflows**: editor/media; independent host/display/audio; QR/independent phone buzzers; a complete standard-game scoring/timer/results workflow; optional-round editing/media; a multiround Daily Double/Final game; Automatic repeated attempts with editor policies, answer reveal, and audio stop; and the private host QR workflow.
 - `git diff --check` passed.
 - The unchanged `./start.command` entry point was smoke-tested with temporary `DATA_DIR` and `PORT=0`: startup, library/page retrieval, starting a single-board game with Automatic activation and its timer disabled, public state, and rejection of unauthenticated ending were checked. Control-C stopped it. No test server remains running.
 
+
+## Private host QR update
+
+The local MacBook library now has **QR code** beside **Copy host link**, opening **Connect your iPad**. QR generation uses the existing local `qrcode` dependency; no private link is logged or sent to an external service. A selected currently advertised non-loopback address on the actual server port is required. Missing/localhost/stale addresses produce guidance and disable copying in the QR dialog. The existing public player QR is unchanged.
+
+The added Chrome workflow decodes QR pixels independently with jsQR and compares the complete current private host URL, including its credential, using boolean assertions so credentials cannot appear in assertion output. Checks include opening, Close, Escape, exact copy behavior, choosing a second advertised address, localhost rejection, disappearance/restoration of network addresses, and actual credential rotation while the dialog is open. The QR is replaced for the new session; a session-change event closes stale UI. Public board/player pages have no private QR control/image; LAN setup remains HTTP 403 and public state omits the host credential. All QR-generation requests stayed local. Network-address changes were simulated in the localhost setup response; no alternate physical interface or physical iPad scan was claimed.
+
+The rebuilt packaged-app workflow also opens/closes this dialog and independently decodes its exact current private URL. Installed data and the application in Applications were not modified. Updated artifacts are in `release/`; quit the installed app before replacing it, as documented in README.md. **Physical iPad camera scanning has not been performed.**
 
 ## Phase 6 packaged Mac application and transfer checks
 

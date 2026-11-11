@@ -8,3 +8,7 @@
 }
 
 .display-shell .revealed-clue{display:flex;flex-direction:column}.display-shell .revealed-clue>.eyebrow{order:-3}.display-shell .revealed-clue>.live-clue-text{order:-2;font-size:clamp(28px,3.6vw,56px)}.display-shell .revealed-clue>.live-answer{order:-1;margin-top:5px;padding-top:15px}.display-shell .revealed-clue>.live-image{max-height:28vh;margin:15px auto}.display-shell .revealed-clue>.audio-indicator{margin:8px 0}
+
+.private-host-qr{width:min(560px,94vw);max-height:90vh;overflow:auto}.private-host-qr>p{margin:16px 0}.private-host-qr>img{display:block;width:min(100%,420px);height:auto;margin:20px auto}.private-host-qr label{display:block;min-width:0}.private-host-qr input{width:100%;min-width:0}.private-host-qr .modal-actions button{min-height:48px}
+
+.host-link-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.host-link-actions button{min-height:48px}

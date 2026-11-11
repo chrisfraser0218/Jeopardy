@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { ActionName, ActionResult, AudioCommand, LiveState, PublicClue, Setup } from '../shared/live';
 import './live.css';
+import { HostQrDialog,privateHostUrl } from './HostQr';
 import { JoinQr, PartyControls, PartyRoster } from './Party';
 import { DailyDoublePanel, FinalView, RoundProgress } from './Rounds';
 import { roundLabel } from '../shared/rounds';
@@ -18,19 +19,21 @@ async function request<T>(path:string,options:RequestInit={}):Promise<T>{
 }
 export async function startLive(gameId:string,timerSeconds:number|null=10,buzzerMode:'manual'|'automatic'='manual'){await request('/start',{method:'POST',body:JSON.stringify({gameId,timerSeconds,buzzerMode})});window.dispatchEvent(new Event('session-change'));}
 export function SessionSetup(){
+  const [qrOpen,setQrOpen]=useState(false);
   const [setup,setSetup]=useState<Setup|null>(null),[origin,setOrigin]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   useEffect(()=>{
-    let active=true;
-    const load=()=>request<Setup>('/setup').then(value=>{if(active){setSetup(value);setOrigin(o=>o||value.origins[1]||value.origins[0]);}}).catch(e=>{if(active)setError(e.message);});
-    void load();const timer=setInterval(load,3000);window.addEventListener('session-change',load);
-    return()=>{active=false;clearInterval(timer);window.removeEventListener('session-change',load);};
+    let active=true,version=0;
+    const load=()=>{const requestVersion=++version;return request<Setup>('/setup').then(value=>{if(active&&requestVersion===version){setSetup(value);setError('');setOrigin(o=>o||value.origins[1]||value.origins[0]);}}).catch(e=>{if(active&&requestVersion===version){setSetup(null);setQrOpen(false);setError(e.message);}});};
+    const changed=()=>{setQrOpen(false);setSetup(null);setNotice('');void load();};
+    void load();const timer=setInterval(load,3000);window.addEventListener('session-change',changed);
+    return()=>{active=false;clearInterval(timer);window.removeEventListener('session-change',changed);};
   },[]);
   async function copy(value:string){try{await navigator.clipboard.writeText(value);setNotice('Link copied.');}catch{setNotice('Select the link field and copy it manually.');}}
   if(!setup)return <p role="status" className="muted">{error||'Checking live session…'}</p>;
-  const display=`${origin}/display`,host=`${origin}/host#${setup.hostToken}`;
+  const display=`${origin}/display`,host=`${origin}/host#${setup.hostToken}`,qrUrl=privateHostUrl(setup.origins,origin,setup.hostToken);
   return <section className="session-setup"><div className="section-heading"><div><p className="eyebrow">LOCAL GAME NIGHT · PHASE 6</p><h2>{setup.session?setup.session.title:'Ready for the big screen'}</h2><p className="muted">{setup.session?`${setup.session.finished?'Game finished — start fresh below or view results.':setup.session.paused?'Paused after restart — resume from the host.':'Session running'} · ${setup.session.completed} clues resolved`:'Start a complete saved game below. Saved definitions stay separate from live progress.'}</p></div><a className="secondary link-button" href="/display" target="_blank" rel="noreferrer">Open display ↗</a></div>
     <p className="connection-help">MacBook: <strong>{setup.origins[0]}</strong>{setup.origins.length>1?' · Wi-Fi addresses available below.':' · No Wi-Fi address detected. Connect this Mac to Wi-Fi and refresh.'}</p>
-    {setup.session&&<><label>iPad / network address<select value={origin} onChange={e=>setOrigin(e.target.value)}>{setup.origins.map(o=><option key={o}>{o}</option>)}</select></label><div className="session-links"><label>Display link<input aria-label="Display link" readOnly value={display}/></label><button className="secondary" onClick={()=>void copy(display)}>Copy display link</button><label>Private host link<input aria-label="Private host link" readOnly value={host}/></label><button className="secondary" onClick={()=>void copy(host)}>Copy host link</button></div><div className="session-options"><a className="gold link-button" href={`/host#${setup.hostToken}`} target="_blank" rel="noreferrer">{setup.session.finished?'View results & history':setup.session.paused?'Open host to resume':'Open host on this Mac'} ↗</a><button className="subtle danger" disabled={setup.session.finished} onClick={async()=>{if(!window.confirm('End this game early? Final standings will be kept. Your saved game remains unchanged.'))return;try{await request('/end',{method:'POST',headers:{Authorization:`Bearer ${setup.hostToken}`}});window.dispatchEvent(new Event('session-change'));setError('');}catch(e){setError((e as Error).message);}}}>End session</button></div><p className="muted">Keep the host link private: anyone with it can see answers and control this session. Paste it into the iPad browser. Use a Wi-Fi address, not localhost, on the iPad.</p></>}
+    {setup.session&&<><label>iPad / network address<select aria-label="iPad / network address" value={origin} onChange={e=>setOrigin(e.target.value)}>{setup.origins.map(o=><option key={o}>{o}</option>)}</select></label><div className="session-links"><label>Display link<input aria-label="Display link" readOnly value={display}/></label><button className="secondary" onClick={()=>void copy(display)}>Copy display link</button><label>Private host link<input aria-label="Private host link" readOnly value={host}/></label><div className="host-link-actions"><button className="secondary" onClick={()=>void copy(host)}>Copy host link</button><button className="secondary" onClick={()=>setQrOpen(true)}>QR code</button></div></div>{qrOpen&&<HostQrDialog key={`${setup.session.id}:${qrUrl}`} url={qrUrl} onClose={()=>setQrOpen(false)}/>}<div className="session-options"><a className="gold link-button" href={`/host#${setup.hostToken}`} target="_blank" rel="noreferrer">{setup.session.finished?'View results & history':setup.session.paused?'Open host to resume':'Open host on this Mac'} ↗</a><button className="subtle danger" disabled={setup.session.finished} onClick={async()=>{if(!window.confirm('End this game early? Final standings will be kept. Your saved game remains unchanged.'))return;try{await request('/end',{method:'POST',headers:{Authorization:`Bearer ${setup.hostToken}`}});window.dispatchEvent(new Event('session-change'));setError('');}catch(e){setError((e as Error).message);}}}>End session</button></div><p className="muted">Keep the host link private: anyone with it can see answers and control this session. Paste it into the iPad browser. Use a Wi-Fi address, not localhost, on the iPad.</p></>}
     {!setup.session&&setup.origins.length>1&&<p className="muted">Wi-Fi: {setup.origins.slice(1).join(' · ')}</p>}
     {notice&&<p role="status">{notice}</p>}{error&&<p role="alert" className="error">{error}</p>}
   </section>;
