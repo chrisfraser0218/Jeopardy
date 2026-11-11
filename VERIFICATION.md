@@ -1,13 +1,31 @@
-# Phase 4 verification
+# Phase 5 verification
 
 Completed November 10, 2026 on macOS arm64, Node.js 24.11.0, and installed Google Chrome through Playwright. All checks used temporary databases/uploads; existing `data/` games, players, sessions, and uploads were not opened for writing or replaced during verification.
 
 ## Completed checks
 
-- `npm run check` passed TypeScript/Vite build and **12 API/migration/restart tests**.
-- `npm run test:browser` passed **4 Chrome workflows**: editor/media; independent host/display/audio; QR/independent phone buzzers; and a complete standard-game scoring/timer/results workflow.
+- `npm run check` passed TypeScript/Vite build and **17 API/migration/restart tests**.
+- `npm run test:browser` passed **6 Chrome workflows**: editor/media; independent host/display/audio; QR/independent phone buzzers; a complete standard-game scoring/timer/results workflow; optional-round editing/media; and a multiround Daily Double/Final game.
 - `git diff --check` passed.
-- The unchanged `./start.command` entry point was smoke-tested with temporary `DATA_DIR` and `PORT=0`. The server started, accepted disabled-timer configuration, registered a player through its LAN URL, rejected an unauthenticated game-ending request (HTTP 401), accepted the host-authorized end (HTTP 204), and retained zero-score final standings. Control-C stopped it. No test server remains running.
+- The unchanged `./start.command` entry point was smoke-tested with temporary `DATA_DIR` and `PORT=0`: startup, library/page retrieval, starting a legacy game with its timer disabled, public state, and rejection of unauthenticated ending were checked. Control-C stopped it. No test server remains running.
+
+
+## Phase 5 rounds, wagers, and privacy
+
+- Optional Double Jeopardy and Final definitions persist across saves/reloads, including disabled incomplete drafts. Enabled rounds alone require completeness. Double defaults are $400–$2,000. Authoring limits of one/two Daily Doubles and separate answer storage were checked.
+- Legacy single-board games and active snapshots remain unchanged. A v4 active-session migration preserved player credentials, selected clue, scores, and ledger without activating newly saved optional rounds. Schema v5 retains prior data and adds round definitions, Daily Double markers, attempt kinds, and private Final submissions.
+- Explicit round advancement and confirmed skipping preserve identities/scores. Joining closes after the first board; existing credentials reconnect. Future clue content and Daily Double locations are absent from public/player payloads. LAN media is unavailable until its clue is revealed.
+- Daily Double tests cover negative scores, minimum/maximum/fractional wagers, correcting the player/wager before reveal, timeout without deduction, correct/incorrect scoring, no rebuzz, duplicate judgments, and explicit after-reveal correction with compensating ledger history and a paused replacement attempt.
+- Final tests cover frozen positive-score eligibility, zero/max/invalid wagers, confirmed wager locking, host on-behalf reasons, explicit missing-wager zero assignment, and no-eligible-player completion.
+- Private response drafts survive refresh/reconnect, use revision checks, and lock on submission or the server deadline. Late edits, wrong-session requests, foreign target fields, unauthorized controls, and blank-correct judgments are rejected. Pause/resume and early close were checked.
+- Private Final judgments do not change public scores, rankings, history, or another player's view. Each individual reveal commits its response, wager, judgment, and score together. Concurrent/retried reveals score once. Revealed-result corrections append compensating entries; tied winners remain tied.
+- Real backend restarts were exercised during a revealed Daily Double, Final wagering, Final responses with saved/locked text, and partial result reveals. Private state, credentials, scores, and reveals survived; timers recovered paused, buzzing closed, and explicit host resume remained necessary. Retrying a revealed result after restart did not score twice.
+
+## Multiround browser game
+
+Independent host, display, Alice-phone, and Bob-phone contexts used the actual UI. Alice answered a first-board Daily Double correctly for $100. After a confirmed skip into Double Jeopardy, Bob lost $100 on its Daily Double and earned $1,200 on a standard clue. The host explicitly skipped the remaining board clues into Final. Alice wagered $100 and Bob $900. Private drafts autosaved; Bob refreshed and recovered his draft; Alice locked hers. Final image/audio, designated-display playback, shared countdown pause/resume, and confirmed early close were exercised. The host judged privately, revealed Bob before Alice, and finished with both at $200. Correcting Bob's result and correcting it back retained compensating history and restored the tie.
+
+This workflow intentionally used the confirmed skip control for remaining clues; it does not claim every clue on both boards was answered. The separate standard-game workflow below still resolves all 30 first-board clues. Optional-round editing also covered enable/disable, retained drafts, Daily Double limits, Final text/image/WAV preview, and persistence.
 
 ## Scoring and atomicity
 
@@ -61,11 +79,11 @@ This was UI automation of host judgments, not automatic answer evaluation or spo
 
 ## Screenshots and limits
 
-Ignored `artifacts/` contains visually inspected screenshots including `scoring-host-timeout.png`, `scoring-display-timeout.png`, `scoring-phone-timeout.png`, `scoring-host-history.png`, and `scoring-final-standings.png`. Earlier editor, QR, phone, portrait/landscape host, and audio screenshots remain available.
+Ignored `artifacts/` contains screenshots from the current workflows. The Final phone private-response and tied-results screenshots were visually inspected. Earlier visually inspected screenshots include `scoring-host-timeout.png`, `scoring-display-timeout.png`, `scoring-phone-timeout.png`, `scoring-host-history.png`, and `scoring-final-standings.png`. Earlier editor, QR, phone, portrait/landscape host, and audio screenshots remain available.
 
 **Not performed:** Safari, physical iPhone/Android/iPad testing, camera scanning from a TV/projector, real cross-device Wi-Fi races, audible speaker listening, or device sleep/background behavior. Browser contexts ran on this Mac even when they used its LAN address. Automated concurrency proves one accepted server winner, not fairness of real-world physical tap timing.
 
-Use the short MacBook + iPad + two-phone checklist in [README.md](README.md) for correct/incorrect scoring, rebuzzing, timeout, correction, restart, audio, and final standings on actual devices.
+Use the short MacBook + iPad + two-phone checklist in [README.md](README.md) for round editing, Daily Doubles, private Final submissions/reveals, restart, audio, and final standings on actual devices.
 
 Practical limits:
 
@@ -75,7 +93,7 @@ Practical limits:
 - Finished results remain until starting fresh. Historical records persist in SQLite, but browsing previous-session archives is outside this phase's UI.
 - Browser credentials are origin-specific; address/browser/storage changes can lose access to a phone's saved credential. Names alone do not restore identities. Wi-Fi/device latency influences server arrival order.
 - Unused media remains intentionally retained. Node 24.11 emits its SQLite experimental-feature notice; Vite emits third-party Zod comment-annotation warnings. Builds succeed.
-- No Double Jeopardy, Daily Doubles, Final Jeopardy, cloud deployment, or automatic answer evaluation was added.
+- Phase 6 packaging, export/import, cloud deployment, and automatic answer evaluation remain outside this phase.
 
 ## Repeat checks
 

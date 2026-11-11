@@ -1,27 +1,29 @@
 import type { GameResults, HostAction, LedgerEntry, LiveSession, Outcome, ResponseAttempt, ResponseTimer } from '../shared/live.js';
 import type { openStore } from './db.js';
+import { currentDefinition, boardProgress } from '../shared/rounds.js';
+import type { Clue } from '../shared/model.js';
 
 type Store=ReturnType<typeof openStore>;
 function fail(message:string):never{throw Object.assign(new Error(message),{status:409});}
 export function scoringService(store:Store,getSession:()=>LiveSession|null,transaction:<T>(fn:()=>T)=>T,broadcast:()=>void,now:()=>number){
-  function decode(row:any):ResponseAttempt{return {id:row.id,sessionId:row.session_id,playerId:row.player_id,clueId:row.clue_id,value:row.value,acceptedAt:row.accepted_at,status:row.status,effectiveOutcome:row.effective_outcome,timer:JSON.parse(row.timer)};}
+  function decode(row:any):ResponseAttempt{return {id:row.id,sessionId:row.session_id,playerId:row.player_id,clueId:row.clue_id,value:row.value,acceptedAt:row.accepted_at,status:row.status,effectiveOutcome:row.effective_outcome,timer:JSON.parse(row.timer),kind:row.kind||'standard'};}
   function attempt(id:string|null):ResponseAttempt|null{if(!id)return null;const row=store.db.prepare('SELECT * FROM response_attempts WHERE id=? AND session_id=?').get(id,getSession()?.id||'');return row?decode(row):null;}
   function current(){return attempt(getSession()?.currentAttemptId||null);}
   function attempts(){return (store.db.prepare('SELECT * FROM response_attempts WHERE session_id=? ORDER BY rowid').all(getSession()?.id||'') as any[]).map(decode);}
   function score(playerId:string){return Number((store.db.prepare('SELECT COALESCE(SUM(amount),0) AS score FROM score_ledger WHERE player_id=? AND session_id=?').get(playerId,getSession()?.id||'') as {score:number}).score);}
   function ledger():LedgerEntry[]{return (store.db.prepare('SELECT l.*,p.name FROM score_ledger l JOIN session_players p ON p.id=l.player_id WHERE l.session_id=? ORDER BY l.rowid').all(getSession()?.id||'') as any[]).map(r=>({id:r.id,sessionId:r.session_id,playerId:r.player_id,playerName:r.name,clueId:r.clue_id,attemptId:r.attempt_id,amount:r.amount,kind:r.kind,reason:r.reason,createdAt:r.created_at,referenceId:r.reference_id}));}
   function save(a:ResponseAttempt){store.db.prepare('UPDATE response_attempts SET status=?,effective_outcome=?,timer=? WHERE id=?').run(a.status,a.effectiveOutcome,JSON.stringify(a.timer),a.id);}
-  function accept(playerId:string){
-    const s=getSession()!,clue=s.game.categories.flatMap(c=>c.clues).find(q=>q.id===s.currentClueId)!;
+  function accept(playerId:string,options:{clue?:Clue;value?:number;kind?:ResponseAttempt['kind'];paused?:boolean;timerDisabled?:boolean}={}){
+    const s=getSession()!,clue=options.clue||currentDefinition(s)!;
     const duration=(s.timerSeconds||0)*1000;
-    const a:ResponseAttempt={id:crypto.randomUUID(),sessionId:s.id,playerId,clueId:clue.id,value:clue.value,acceptedAt:new Date(now()).toISOString(),status:'pending',effectiveOutcome:null,timer:{state:s.timerSeconds===null?'disabled':'running',deadline:s.timerSeconds===null?null:now()+duration,remainingMs:duration,timedOut:false}};
-    store.db.prepare('INSERT INTO response_attempts VALUES (?,?,?,?,?,?,?,?,?)').run(a.id,a.sessionId,a.playerId,a.clueId,a.value,a.acceptedAt,a.status,null,JSON.stringify(a.timer));s.currentAttemptId=a.id;return a;
+    const a:ResponseAttempt={kind:options.kind||'standard',id:crypto.randomUUID(),sessionId:s.id,playerId,clueId:clue.id,value:options.value??clue.value,acceptedAt:new Date(now()).toISOString(),status:'pending',effectiveOutcome:null,timer:{state:options.timerDisabled||s.timerSeconds===null?'disabled':options.paused?'paused':'running',deadline:options.timerDisabled||s.timerSeconds===null||options.paused?null:now()+duration,remainingMs:duration,timedOut:false}};
+    store.db.prepare('INSERT INTO response_attempts VALUES (?,?,?,?,?,?,?,?,?,?)').run(a.id,a.sessionId,a.playerId,a.clueId,a.value,a.acceptedAt,a.status,null,JSON.stringify(a.timer),a.kind!);s.currentAttemptId=a.id;return a;
   }
   function stopTimer(a:ResponseAttempt){if(a.timer.deadline!==null)a.timer.remainingMs=Math.max(0,a.timer.deadline-now());a.timer.deadline=null;a.timer.state=a.timer.state==='disabled'?'disabled':'stopped';}
   function dismiss(reason:string){const a=current();if(a?.status==='pending'){stopTimer(a);a.status='dismissed';a.effectiveOutcome='dismissed';save(a);}return reason;}
-  function resolve(){const s=getSession()!;if(s.currentClueId&&!s.completed.includes(s.currentClueId))s.completed.push(s.currentClueId);s.buzzer.open=false;}
+  function resolve(){const s=getSession()!;if(s.currentClueId&&!s.completed.includes(s.currentClueId))s.completed.push(s.currentClueId);s.buzzer.open=false;if(s.round==='first'&&boardProgress(s).resolved===30)s.joiningOpen=false;}
   function add(playerId:string,amount:number,kind:LedgerEntry['kind'],reason:string,a:ResponseAttempt|null=null,referenceId:string|null=null){
-    if(!Number.isSafeInteger(amount)||Math.abs(score(playerId)+amount)>1_000_000_000)fail('Scores must be integer dollars between -$1,000,000,000 and $1,000,000,000.');
+    if(!Number.isSafeInteger(amount)||!Number.isSafeInteger(score(playerId)+amount))fail('Scores must remain safe integer dollar amounts.');
     const id=crypto.randomUUID();store.db.prepare('INSERT INTO score_ledger VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,getSession()!.id,playerId,a?.clueId||null,a?.id||null,amount,kind,reason,new Date(now()).toISOString(),referenceId);return id;
   }
   function standings(){const rows=store.db.prepare('SELECT id,name FROM session_players WHERE session_id=? AND removed=0 ORDER BY rowid').all(getSession()!.id) as {id:string;name:string}[];const sorted=rows.map(p=>({...p,score:score(p.id)})).sort((a,b)=>b.score-a.score);let rank=1;return sorted.map((p,i)=>{if(i&&p.score!==sorted[i-1].score)rank=i+1;return {...p,rank};});}
@@ -29,6 +31,13 @@ export function scoringService(store:Store,getSession:()=>LiveSession|null,trans
   function finish(reason:GameResults['reason']){
     const s=getSession()!;dismiss('Game ended without judgment');s.finished=true;s.paused=false;s.joiningOpen=false;s.showJoinQr=false;s.buzzer.open=false;s.buzzer.windowId=null;s.buzzer.winnerId=null;s.currentClueId=null;s.revealed=false;
     s.results={finishedAt:new Date(now()).toISOString(),reason,standings:standings()};refreshResults();
+  }
+  function judgeAttempt(target:ResponseAttempt,outcome:'correct'|'incorrect',resolveClue=true){
+    if(target.status!=='pending')fail('This attempt has already been judged.');
+    const s=getSession()!;add(target.playerId,outcome==='correct'?target.value:-target.value,'judgment',outcome==='correct'?'Correct spoken response':'Incorrect spoken response',target);
+    target.status=outcome;target.effectiveOutcome=outcome;stopTimer(target);save(target);s.buzzer.open=false;
+    if(resolveClue&&(outcome==='correct'||target.kind==='daily-double'))resolve();
+    if(outcome==='incorrect'&&target.kind!=='final'){if(!s.buzzer.excludedIds.includes(target.playerId))s.buzzer.excludedIds.push(target.playerId);s.buzzer.winnerId=null;s.buzzer.windowId=null;}
   }
   function hostAction(a:HostAction){
     const s=getSession()!;
@@ -41,6 +50,7 @@ export function scoringService(store:Store,getSession:()=>LiveSession|null,trans
     if(a.type==='judgment-correct'){
       const target=attempt(a.attemptId||null);if(!target||!['correct','incorrect'].includes(target.status))fail('Choose an existing scored judgment from this session.');
       if(!a.reason?.trim()||!a.outcome)fail('Choose the intended outcome and give a correction reason.');
+      if(target.kind==='final'){if(a.outcome==='dismissed')fail('Final corrections must be correct or incorrect. Use a reasoned manual adjustment after finishing if needed.');const row=store.db.prepare('SELECT response FROM final_submissions WHERE attempt_id=?').get(target.id) as {response:string}|undefined;if(a.outcome==='correct'&&!row?.response.trim())fail('Blank Final responses must remain incorrect.');}
       if(target.effectiveOutcome===a.outcome)fail('That is already the effective judgment. No correction is needed.');
       const original=store.db.prepare("SELECT id FROM score_ledger WHERE attempt_id=? AND kind='judgment'").get(target.id) as {id:string}|undefined;if(!original)fail('The original judgment entry is unavailable.');
       const net=(store.db.prepare('SELECT COALESCE(SUM(amount),0) AS amount FROM score_ledger WHERE attempt_id=?').get(target.id) as {amount:number}).amount;
@@ -51,10 +61,8 @@ export function scoringService(store:Store,getSession:()=>LiveSession|null,trans
     if(a.type==='finish-clue'){if(!s.currentClueId)fail('Select a clue first.');if(s.completed.includes(s.currentClueId))fail('This clue is already resolved. Return to the board.');dismiss('Clue finished without winner');resolve();s.buzzer.winnerId=null;s.buzzer.windowId=null;return true;}
     if(a.type==='judge-correct'||a.type==='judge-incorrect'){
       const target=current();if(!target||target.id!==a.attemptId||target.status!=='pending'||target.clueId!==s.currentClueId||s.completed.includes(target.clueId)||s.buzzer.winnerId!==target.playerId)fail('That response is no longer the current unresolved attempt. It cannot be scored again.');
-      const outcome:Outcome=a.type==='judge-correct'?'correct':'incorrect';
-      add(target.playerId,outcome==='correct'?target.value:-target.value,'judgment',outcome==='correct'?'Correct spoken response':'Incorrect spoken response',target);
-      target.status=outcome;target.effectiveOutcome=outcome;stopTimer(target);save(target);s.buzzer.open=false;
-      if(outcome==='correct')resolve();else{if(!s.buzzer.excludedIds.includes(target.playerId))s.buzzer.excludedIds.push(target.playerId);s.buzzer.winnerId=null;s.buzzer.windowId=null;}
+      if(target.kind==='final')fail('Final judgments are committed only when the host reveals that player’s result.');
+      judgeAttempt(target,a.type==='judge-correct'?'correct':'incorrect');
       return true;
     }
     if(a.type==='dismiss-attempt'){
@@ -85,5 +93,5 @@ export function scoringService(store:Store,getSession:()=>LiveSession|null,trans
       if(a.timer.deadline!==null)a.timer.remainingMs=Math.max(0,a.timer.deadline-now());if(a.timer.remainingMs===0)a.timer.timedOut=true;a.timer.deadline=null;a.timer.state='paused';save(a);
     }
   }
-  return {current,attempt,attempts,score,ledger,accept,dismiss,resolve,finish,hostAction,expire,tick,recover,refreshResults};
+  return {current,attempt,attempts,score,ledger,accept,judgeAttempt,add,dismiss,resolve,finish,hostAction,expire,tick,recover,refreshResults};
 }

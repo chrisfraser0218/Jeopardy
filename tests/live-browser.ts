@@ -36,7 +36,7 @@ test('independent board and host browsers synchronize, protect answers, control 
     if(lan)assert.equal(await host.evaluate(()=>window.isSecureContext),false);
     await host.getByRole('button',{name:'Select Kitchen science $200',exact:true}).click();
     await board.getByText(game.categories[0].clues[0].text,{exact:true}).waitFor();
-    assert.equal(await board.locator('.live-answer').count(),0);assert.equal(await host.locator('.live-answer').count(),1);
+    assert.equal(await board.locator('.live-answer').count(),0);await host.locator('.live-answer').waitFor();assert.equal(await host.locator('.live-answer').count(),1);
     await board.waitForFunction(()=>{const img=document.querySelector('.live-image') as HTMLImageElement;return img?.complete&&img.naturalWidth>0;});
     await board.waitForFunction(()=>{const a=document.querySelector('audio');return a&&a.readyState>=1;});
     assert.equal(await board.locator('audio').evaluate((a:HTMLAudioElement)=>a.paused),true);

@@ -46,7 +46,7 @@ test('live session authority, privacy, snapshot isolation, commands, and audio o
       for(const path of ['/api/games','/api/live/setup'])assert.equal((await fetch(lanRoot+path)).status,403);
       assert.equal((await fetch(lanRoot+'/api/live/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameId:game.id})})).status,403);
       assert.equal((await fetch(lanRoot+'/api/media',{method:'POST'})).status,403);
-      assert.equal((await fetch(lanRoot+`/api/media/${game.categories[0].clues[0].imageId}`)).status,200);
+      assert.equal((await fetch(lanRoot+`/api/media/${game.categories[0].clues[0].imageId}`)).status,403);
       const other=await upload(png,'unused.png');assert.equal((await fetch(lanRoot+`/api/media/${other}`)).status,403);
       assert.equal((await fetch(lanRoot+'/api/live/host')).status,401);
     }
@@ -122,7 +122,7 @@ test('v1 database migration preserves existing definitions and media metadata',a
     old.db.prepare('INSERT INTO media VALUES (?, ?, ?, ?, ?, ?)').run('kept-media','image','kept.png','image/png',100,'kept.png');
     old.db.exec('DROP TABLE score_ledger; DROP TABLE response_attempts; DROP TABLE session_results; DROP TABLE session_players; DROP TABLE live_session; PRAGMA user_version=1;');old.db.close();
     const migrated=openStore(directory);
-    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,4);}
+    try{assert.deepEqual(migrated.get(game.id),game);assert.equal(migrated.list().length,1);assert.equal(migrated.media('kept-media')?.name,'kept.png');assert.equal((migrated.db.prepare('PRAGMA user_version').get() as any).user_version,5);}
     finally{migrated.db.close();}
   }finally{await rm(directory,{recursive:true,force:true});}
 });

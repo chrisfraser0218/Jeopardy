@@ -23,7 +23,7 @@ export function createApp(directory=resolve('data'), options:{now?:()=>number}={
     if (!sameOrigin(req) || req.get('sec-fetch-site')==='cross-site') return res.status(403).json({error:'Open the app directly on the game server origin.'});
     next();
   });
-  app.use(express.json({limit:'1mb'}));
+  app.use(express.json({limit:'8mb'}));
   app.get('/api/live/setup',localOnly,(req,res)=>res.json(live.setup(req.socket.localPort!)));
   app.post('/api/live/start',localOnly,(req,res)=>{const {gameId,timerSeconds}=z.object({gameId:z.uuid(),timerSeconds:z.number().int().min(1).max(120).nullable().default(10)}).parse(req.body);live.start(gameId,timerSeconds);res.status(201).json(live.setup(req.socket.localPort!));});
   app.post('/api/live/end',localOnly,(req,res)=>{if(!live.authorized(req.get('authorization')?.replace(/^Bearer /,'')))return res.status(401).json({error:'A valid host credential is required to end the game.'});live.endLocal();res.status(204).end();});

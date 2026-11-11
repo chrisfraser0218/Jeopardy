@@ -1,6 +1,6 @@
 # Blueboard — local Jeopardy-style game night
 
-Phase 4 adds individual scoring, response timers, correction history, and complete standard-game results. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
+Phase 5 adds optional Double Jeopardy, Daily Doubles, and private Final Jeopardy wagering/responses. The game library, draft editor, media uploads, large-screen display, private iPad host controller, audio, and live-session recovery remain available. Games, media, and session progress stay on your Mac; after installation, play needs no internet or paid services.
 
 ## Start and stop
 
@@ -35,7 +35,7 @@ Normal startup remains just `./start.command`; it never installs packages or con
 ## Set up the MacBook display and iPad host
 
 1. Connect the MacBook and iPad to the **same local Wi-Fi**. Open the library through **localhost on the MacBook**.
-2. Save a complete game: a nonempty title and category names, plus an answer and at least one of text/image/audio in every clue. Choose **Start Game** on its library card. Draft cards offer **Check start requirements**, which lists missing items. Unsaved editor changes are not included: return to the library after saving first.
+2. Save a complete game: a nonempty title and category names, plus an answer and at least one of text/image/audio in every clue of each enabled round. Choose **Start Game** on its library card. Draft cards offer **Check start requirements**, which lists missing items. Unsaved editor changes are not included: return to the library after saving first.
 3. In the session panel, choose **Open display**. This opens `http://localhost:3000/display` in another tab. Put that tab on the TV/projector and choose **Fullscreen**. Choose **Enable Audio** on this tab once. Keep the library and private host off the projected screen.
 4. In the library session panel, select the MacBook's Wi-Fi address (for example, `http://192.168.1.25:3000`). **Copy host link**, then transfer/paste the whole private link into the iPad browser. The link includes a long credential after `#`. **Do not use localhost on the iPad**: that refers to the iPad itself.
 5. The display and host should both say **Connected**. Select clues on the iPad; the MacBook display follows automatically. The host always sees the correct answer. The display receives an answer only after the host reveals that clue.
@@ -54,7 +54,7 @@ The normal sequence is:
 2. Choose **Open buzzing**. Only eligible connected players can buzz. The server accepts one winner and starts that response's timer if enabled.
 3. In **Judge response**, review the player, current score, clue value, and correct answer. The human host judges the spoken response; the app does not evaluate answers.
 4. Choose **Correct** or **Incorrect**. If incorrect, explicitly reopen buzzing for another eligible player. If correct, the clue is resolved.
-5. Reveal the answer when ready, then **Return to board**. Once all 30 clues are resolved, choose **Finish Game**.
+5. Reveal the answer when ready, then **Return to board**. When the board is resolved, explicitly advance to the next enabled round, or choose **Finish Game** if no round remains. Final Jeopardy finishes after every eligible result is revealed.
 
 | Host action | Result |
 | --- | --- |
@@ -65,12 +65,12 @@ The normal sequence is:
 | Reveal answer on display | Allowed after judging/dismissing; resolves the clue and prevents further competitive buzzing for that presentation |
 | Return without completing | Returns an unresolved clue to the board after any pending attempt has been judged/dismissed; it stops audio and buzzing |
 | Reopen a completed clue | Explicit confirmation opens it with its answer hidden; scores/history remain, and old attempts cannot be judged again |
-| Finish Game | Offered when all clues are resolved; freezes play and shows final standings |
+| Finish Game | Offered after the last enabled board is resolved when no Final remains; freezes play and shows standings |
 | End session | Confirmation ends early, disables timers/buzzers, and retains final standings and history |
 
 Every judgment belongs to a unique accepted attempt. Repeated taps, retries, reconnects, and concurrent host requests cannot score that attempt twice. Stale host actions are rejected and the current state is shown. The saved game definition remains separate and unchanged.
 
-If everyone has attempted/been excluded, resolve the clue with **Finish Without Winner**, or explicitly reset eligibility as a correction. If eligible players are disconnected, wait for reconnection or finish the clue. Buzzing cannot be opened when no eligible players are connected.
+For standard clues, if everyone has attempted/been excluded, resolve the clue with **Finish Without Winner**, or explicitly reset eligibility as a correction. If eligible players are disconnected, wait for reconnection or finish the clue. Buzzing cannot be opened when no eligible players are connected.
 
 ### Response timer
 
@@ -86,17 +86,75 @@ Every player, including a midgame arrival, starts at **$0** in a fresh session. 
 
 Open **Scoreboard & history → Scoring ledger** to see each entry's player, signed amount, reason, time, and related clue/attempt. Only the authenticated host can judge, adjust scores, control timers, or end the game. The localhost library's End session control also supplies the private host credential.
 
-- **Adjust score:** choose a player (including a removed player when correcting history), enter a nonzero positive or negative integer, and give a required reason. A single adjustment is limited to ±$1,000,000; total scores must stay within ±$1,000,000,000. Reasons are limited to 300 characters.
+- **Adjust score:** choose a player (including a removed player when correcting history), enter a nonzero positive or negative integer, and give a required reason. A single adjustment is limited to ±$1,000,000; total scores must remain safe integer dollar amounts. Reasons are limited to 300 characters.
 - **Correct judgment:** choose an original judgment in the ledger, select the intended outcome (correct, incorrect, or dismissed), and give a reason. The app appends a reversal of that attempt's current effective score, then a replacement entry. It never deletes the original judgment. For example, changing a mistaken −$200 to a correct +$200 appends +$200 to reverse the deduction and +$200 for the intended award: a net correction of +$400.
 - Corrections change **scores only**. They do not reopen clues, undo completion, reset exclusions, or create a new response opportunity. If play must resume, separately reopen the clue and, if appropriate, reset eligibility. Reopening itself never reverses points. A newly accepted response is a new attempt; an old attempt cannot be scored again.
 
-Judgment, ledger entry, timer stop, and clue progress are committed atomically. Corrections may also be made after finishing; final standings update accordingly. Starting fresh clears the live board/scores/attempts while preserving the saved game and historical ledger/player/attempt/result records in SQLite. The current host history view is scoped to the current session; an archive-browsing interface is not included.
+Judgment, ledger entry, timer stop, and clue progress are committed atomically. During Final, manual adjustments wait until all results are revealed; revealed Final judgments can still be corrected. Corrections may also be made after finishing; final standings update accordingly. Starting fresh clears the live board/scores/attempts while preserving the saved game and historical ledger/player/attempt/result records in SQLite. The current host history view is scoped to the current session; an archive-browsing interface is not included.
 
 ### Finishing and ties
 
-After all clues are resolved, **Finish Game** shows score-ranked standings. Use **End session** with confirmation to finish early. Disconnected active players still rank; removed players do not. Equal scores share a rank (for example, 1, 1, 3), and ties for first show **Joint winners**. With no active players, results say so explicitly.
+After the last board is resolved with no Final remaining, **Finish Game** shows score-ranked standings. If Final is enabled, all eligible results must be revealed first. Use **End session** with confirmation to finish early. Disconnected active players still rank; removed players do not. Equal scores share a rank (for example, 1, 1, 3), and ties for first show **Joint winners**. With no active players, results say so explicitly.
 
 Results remain on the display, host, and registered phones across refreshes and server restarts until a fresh session starts. Joining and buzzing are closed and timers/audio are stopped. Existing credentials can view those finished results; starting a fresh session invalidates old host/player credentials and links for entering the new game. Use **Start Game** on a saved complete game in the library to start fresh at zero.
+
+## Optional round editing
+
+Open a saved game in the editor and use **Enable Double Jeopardy** or **Enable Final Jeopardy**, then select the corresponding **Edit…** tab. Existing games remain single-board games until you enable more rounds. Disabling a round retains its draft content and media; completeness checks apply only to enabled rounds.
+
+- The first board stays six categories × five clues with its existing values.
+- A new Double Jeopardy board defaults to six categories × five clues worth **$400, $800, $1,200, $1,600, $2,000**. Names, individual values, text, image, audio, answers, previews, and draft saving work as on the first board.
+- Mark **Daily Double** in a clue editor: at most **one on the first board** and **two on Double Jeopardy**. They are optional. The editor disables additional marks at the limit, and the server validates it too. Boards containing a Daily Double need a highest value of at least $5.
+- Final Jeopardy has one category and one clue, with an answer and optional image/audio. It uses the same clue editor and preview; its wager replaces a fixed clue value during play.
+
+Save before starting. The library's ready/total count includes enabled rounds. A running session keeps its copied definition, even if you enable, disable, or edit rounds in the library later. Existing active-session snapshots are not upgraded into extra rounds.
+
+## Round progression
+
+The display and host show the current round. Players and scores carry forward. Once a board is resolved, choose **Advance to next round**; scores are not reset. **Skip remaining clues & advance…** requires confirmation and resolves the remaining clues without points before advancing. On the last board without another round, **Skip remaining clues — no score…** resolves it and returns to the board; choose Finish Game explicitly afterward.
+
+Joining permanently closes when the first board ends. Already registered players can reconnect throughout later rounds. Starting a fresh session is required to admit a new roster after that point. Results are not shown while another enabled round remains.
+
+## Daily Double play
+
+Selecting a Daily Double shows an announcement while its clue stays hidden. Normal buzzers are disabled, including before reveal.
+
+1. On the host, identify the nonremoved player who physically chose the clue.
+2. Enter and **Confirm Daily Double wager**. The allowed integer range is **$5 through the greater of that player's score or the highest configured value on the current board**. Zero and negative scores still get the board's maximum. The host shows the range and the server enforces it.
+3. Before revealing, you may change the player (which clears the wager) or confirm a different wager. Choose **Reveal Daily Double clue** only when setup is correct.
+4. The selected player responds alone; the normal response timer starts if enabled. Correct adds the wager; incorrect subtracts it. Either judgment resolves the clue, and other players cannot rebuzz. Timeout still requires a host judgment and never deducts automatically.
+
+**Correct Daily Double setup after reveal…** is an explicit, reasoned workflow. It compensates any existing judgment on that attempt (or records the dismissed pending attempt), changes player/wager, reopens this clue as a new accepted attempt, and pauses its new timer if enabled. The pre-Daily-Double score is used for correction limits. Judge that new attempt or explicitly resume its timer. Old attempts remain in history and cannot be judged twice. After leaving the clue, normal ledger corrections/manual adjustments remain available; they do not automatically redo play.
+
+The regular accidental-buzz/eligibility controls are for standard clues. A Daily Double can instead be skipped without points or judged; its location is never sent in future public clue data.
+
+## Final Jeopardy
+
+### Category and private wagers
+
+Final is optional. At entry, the server freezes eligibility and starting scores: **nonremoved players with a positive score** participate, including disconnected players. Others keep their scores and can view results. If nobody qualifies, Final is skipped and standings appear. Eligibility is frozen, so player removal is disabled during Final.
+
+Only the category is shown during wagering. Each eligible phone enters an integer wager from **$0 through its frozen starting score**, then confirms it. Confirmed wagers cannot be changed. Each phone sees only its own private wager; the host sees submission status and values. The board and other phones see counts, not private wagers.
+
+For an unavailable phone, the host may enter that player's wager with a required recorded reason. Before revealing the clue, every eligible player must have a wager. **Assign missing wagers to $0…** is a separate explicit confirmation action that records the host's decision; nothing silently fills them in.
+
+### Clue, shared timer, and private responses
+
+Choose **Reveal Final clue & start 30 seconds**. The clue/image is shown and a shared server-authoritative 30-second countdown begins. The host alone controls attached audio, which plays only on the designated MacBook display. No theme music or external media is required or included.
+
+Eligible players type their responses on their phones. Drafts autosave after a short typing pause; **Save response draft** also saves immediately. Watch the visible **Unsaved / Saving… / Saved / Locked** state. Only the latest **server-saved** text can be locked at the deadline. **Submit final response** requires confirmation and locks the response early. A disconnected phone cannot submit; check saved state after reconnecting. Responses are limited to 5,000 characters and remain private to their player and host until revealed.
+
+The host may pause/resume the shared timer. **Close Final responses early…** requires confirmation and locks the latest saved drafts. At server expiry, every latest saved draft locks automatically, including blanks. Late edits and wrong-stage submissions are rejected. Pausing the timer freezes time; players may still edit while the session is running. After a restart, the session and shared timer require explicit resumption; a recovered exhausted timer requires the host to close responses and judge.
+
+### Private judging and chosen reveal order
+
+After responses lock, the human host judges each correct or incorrect. Blank responses must be incorrect. Judgments may be changed privately before that player's reveal; they have not yet changed a score or written a scoring entry.
+
+Choose **Reveal [player]'s result** in any order. That action reveals the response, wager, judgment, and resulting score together, and commits that wager's score change exactly once through the ledger. Before a player's reveal, their public score is unchanged and their response/wager/outcome is absent from public/player views. There is no premature ranking or history entry to reveal an unrevealed judgment.
+
+After a result is public, use the existing **Correct judgment** workflow with a reason for compensating entries. Final corrections must remain correct/incorrect, and a blank cannot become correct. During partial reveals, only already revealed Final judgments can be corrected; other score adjustments wait until Final finishes. Every eligible result must be revealed before final standings appear. Ties remain joint winners; there is no tiebreaker.
+
+Ending early is still possible with confirmation. Only already committed/revealed scores are counted; unrevealed Final judgments are abandoned without points. Starting fresh invalidates previous live credentials, resets play, and preserves historical records in SQLite. Packaging and export/import remain outside this phase.
 
 ## QR joining and phone buzzers
 
@@ -177,7 +235,7 @@ The sample game is clearly marked, editable, and includes 30 original example cl
 | MP3 | `.mp3` | 20 MiB |
 | WAV | `.wav` | 20 MiB |
 
-The UI labels these limits as MB (limits use 1,024² bytes). The server checks signatures, matching extensions, kinds, and sizes; one file per request. Filenames in storage are generated UUIDs. A valid container with unsupported/damaged encoding can still fail playback; the UI explains loading failures. No upload-directory listing is served. LAN media requests are limited to media referenced by the active snapshot; localhost retains editor access.
+The UI labels these limits as MB (limits use 1,024² bytes). The server checks signatures, matching extensions, kinds, and sizes; one file per request. Filenames in storage are generated UUIDs. A valid container with unsupported/damaged encoding can still fail playback; the UI explains loading failures. No upload-directory listing is served. LAN media requests are limited to the currently revealed clue presentation; future media and special-round clues stay unavailable until revealed. Localhost retains editor access.
 
 ## Storage and backups
 
@@ -188,7 +246,7 @@ The UI labels these limits as MB (limits use 1,024² bytes). The server checks s
 | `data/uploads/` | Local media files |
 | `dist/` | Built frontend, regenerated by `npm run build` |
 
-**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential. SQLite migration v4 adds response-attempt, append-only score-ledger, and result tables without replacing saved definitions, uploads, sessions, or players. Older sessions initialize at zero with no invented past judgments; a known accepted winner becomes an unresolved response with its timer paused. Existing snapshots recover with buzzing closed. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
+**Stop the server before backing up**, then copy the whole `data` folder. Restore it with the server stopped. Keep database and uploads together. Backups include the active session's private host credential, Final wagers, and response drafts. SQLite migration v5 adds round definitions/answers, Daily Double flags/attempt kinds, and private Final submissions without replacing saved definitions, uploads, sessions, players, or the ledger. Sessions predating scoring initialize at zero with no invented past judgments; Phase 4 scores and ledger entries are preserved; a known accepted winner becomes an unresolved response with its timer paused. Existing snapshots recover with buzzing closed. Do not downgrade an upgraded database to an earlier-phase server. Phone credentials themselves remain in browser local storage; server backups include their hashes, the roster, and buzzer progress.
 
 Attachments are deliberately retained when removed, replaced, abandoned in an unsaved edit, or associated with a deleted game. Live snapshots and saved definitions may still need them. There is no automatic media cleanup, so disk use can grow. Deleting `data` permanently resets the entire library and active session.
 
@@ -212,20 +270,20 @@ Tests use temporary data, not your real library. Browser tests use installed Goo
 
 Run this checklist with your **MacBook, iPad, and at least two phones**:
 
-1. Put all devices on the same Wi-Fi. Start a complete game with the default timer, open the MacBook display/fullscreen and private iPad host, enable display audio, and join two different names by QR. Check both phones begin at $0.
-2. Select a clue, open buzzing, buzz on one phone, and judge **Correct**. Check the clue value is added once on every screen, the timer stops, the clue resolves, and you can reveal and return. Retry taps must not add more points.
-3. On another clue, judge the first phone **Incorrect**. Check its deduction (including a negative total), timer stop, exclusion, and closed buzzing. Explicitly reopen, buzz on the second phone, and judge it. If nobody remains eligible/connected, check the host's explanation and Finish Without Winner option.
-4. Accept another buzz, pause/resume the response timer, then let it expire. Confirm the host, display, and winning phone show timeout and **no automatic deduction** occurs. Judge or dismiss explicitly. Check an accidental-buzz clear also changes no score.
-5. Use **Correct judgment** with a required reason, then a manual positive/negative adjustment. Check the original entry plus reversal/replacement remain visible and totals update. Confirm correcting a judgment does not automatically reopen the clue or reset eligibility.
-6. Restart the server with an unresolved response. Check scores/history survive, the response timer returns paused, buzzing remains closed, and session/timer require separate resume actions. Verify disconnected-player scores, phone refresh/reconnect, QR joining, and image/audio playback still work.
-7. Resolve unanswered clues with Finish Without Winner and finish the whole game, or end early with confirmation. Check ranked standings and joint winners after equalizing scores. Remove a throwaway player before finishing to verify exclusion from standings and retained history. Start fresh and confirm scores/progress reset while the saved game and past ledger records remain intact.
+1. Create or edit a game with both optional rounds enabled, one first-board Daily Double, up to two Double-board Daily Doubles, and a Final category/clue. Add an image/audio clip to a special clue, preview, save, restart, and confirm the definition persists. Also confirm an old single-board game still starts unchanged.
+2. Start, connect the iPad host and two phones, and enable audio on the MacBook display. Select a Daily Double: confirm the clue is hidden and all phone buzzers are disabled. Choose its player and valid wager, reveal, test timeout/pause/resume, then judge. Incorrect must resolve it without letting the other phone rebuzz.
+3. Advance or confirm skipping to Double Jeopardy. Check the current-round label, carried scores/identities, closed joining, and existing-player reconnection. Exercise the explicit Daily Double setup-correction workflow and inspect compensating history.
+4. Enter Final with positive player scores. Confirm only the category appears. Submit $0/max wagers on the phones and verify neither phone sees the other's wager. Test a host-entered wager with a reason or assign missing wagers to $0 explicitly.
+5. Reveal the Final clue. Check image proportions and host-controlled audio only from the MacBook. Type and save private drafts on both phones, refresh one phone, submit/lock one response early, and let the shared timer expire or explicitly close it early. Check the latest Saved drafts lock and late edits are rejected.
+6. Judge privately. Verify public scores and the other phone reveal nothing about unrevealed outcomes. Reveal players in your chosen order, confirm each score changes once, correct a revealed judgment with a reason, and verify final standings/joint winners only after all results are revealed.
+7. Stop/restart during a Daily Double, Final wagering, Final responses, and after one result reveal. Confirm private state and committed scores survive, timers return paused, buzzing stays closed, and explicit host actions resume play without duplicate submissions or awards.
 
 ## Developer notes and scope
 
-React/TypeScript/Vite, Node/Express, SQLite via Node, and Socket.IO. All fonts/icons/assets are local; no CDN dependency. `server/access.ts` restricts local management. `server/live.ts` owns validated revisioned actions, per-connection roles, audio ownership, and field-by-field public projections. `shared/live.ts` defines wire shapes; `src/Live.tsx` provides the setup, display, and host interfaces. `server/players.ts` owns normalized names, hashed credentials, active tabs, and atomic buzzer acceptance; `src/Party.tsx` provides local QR generation, party controls, and phone pages. `server/scoring.ts` owns attempt judgments, append-only ledger writes, timer deadlines/recovery, and standings; `src/Scoring.tsx` provides judging, countdowns, corrections/history, and final results. Public broadcasts omit host credentials and every unrevealed answer. The host credential is validated independently for HTTP private state and Socket.IO connections/actions.
+React/TypeScript/Vite, Node/Express, SQLite via Node, and Socket.IO. All fonts/icons/assets are local; no CDN dependency. `server/access.ts` restricts local management. `server/live.ts` owns validated revisioned actions, per-connection roles, audio ownership, and field-by-field public projections. `shared/live.ts` defines wire shapes; `src/Live.tsx` provides the setup, display, and host interfaces. `server/players.ts` owns normalized names, hashed credentials, active tabs, and atomic buzzer acceptance; `src/Party.tsx` provides local QR generation, party controls, and phone pages. `server/scoring.ts` owns attempt judgments, append-only ledger writes, timer deadlines/recovery, and standings; `src/Scoring.tsx` provides judging, countdowns, corrections/history, and final results. `shared/rounds.ts`, `server/rounds.ts`, and `src/Rounds.tsx` add round selection, special-clue controls, private Final projections/submissions, and reveal transactions. Optional-round answers are stored separately from presentation definitions. Public broadcasts omit host credentials and every unrevealed answer. The host credential is validated independently for HTTP private state and Socket.IO connections/actions.
 
 Saved games, categories, clues, and media keep stable IDs and explicit order. Session snapshots live separately from game definitions; action IDs and revisions protect retries and concurrent tabs. Audio ownership/playback is memory-only. Player identities are stored separately in `session_players`. Player socket/API payloads are built independently and contain no answers (even revealed ones) or host credentials. Presence is memory-only. Successful buzzes create persistent response attempts in the same transaction as the winner/window update. Host score changes and session progress use the same transaction, with post-commit broadcasts. Score totals are derived from ledger entries. Timers use server deadlines; no client timeout event has authority.
 
 For development, run `npm run dev:server` and `npm run dev` in separate Terminals. Vite proxies `/api` and `/socket.io` (including WebSockets) to Express. Normal startup serves all frontend, API, media, and Socket.IO traffic from one origin.
 
-Phase 4 includes no automatic answer evaluation, Daily Doubles, Double Jeopardy, Final Jeopardy, external accounts, or cloud deployment. The human host judges spoken responses.
+Phase 5 includes no automatic answer evaluation, tiebreaker, packaging, export/import, external accounts, or cloud deployment. The human host judges spoken responses.

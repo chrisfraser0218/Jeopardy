@@ -3,6 +3,7 @@ import type { Server, Socket } from 'socket.io';
 import { z } from 'zod';
 import type { BuzzerState, HostAction, LiveSession, PlayerIdentity, PlayerPublic, PlayerState } from '../shared/live.js';
 import type { openStore } from './db.js';
+import type { roundService } from './rounds.js';
 import type { scoringService } from './scoring.js';
 
 type PlayerRow = { id:string; session_id:string; name:string; removed:number };
@@ -12,7 +13,7 @@ function fail(message:string,status=400):never{throw Object.assign(new Error(mes
 const joinSchema=z.object({sessionId:z.uuid(),name:z.string().transform(s=>s.normalize('NFKC').trim()).pipe(z.string().min(1,'Enter a player name.').max(24,'Use a name with 24 characters or fewer.').regex(/^[^\p{C}]+$/u,'Use a name without control or invisible characters.'))}).strict();
 const buzzSchema=z.object({sessionId:z.uuid(),windowId:z.uuid()}).strict();
 
-export function playerService(store:ReturnType<typeof openStore>,io:Server,getSession:()=>LiveSession|null,broadcast:()=>void,origins:()=>string[],scoring:ReturnType<typeof scoringService>,transaction:<T>(fn:()=>T)=>T,afterCommit:(fn:()=>void)=>void,now:()=>number){
+export function playerService(store:ReturnType<typeof openStore>,io:Server,getSession:()=>LiveSession|null,broadcast:()=>void,origins:()=>string[],scoring:ReturnType<typeof scoringService>,transaction:<T>(fn:()=>T)=>T,afterCommit:(fn:()=>void)=>void,now:()=>number,rounds:ReturnType<typeof roundService>){
   // A credential can have many observer tabs but only one socket can buzz.
   const tabs=new Map<string,Set<string>>();
   const active=(id:string)=>tabs.get(id)?.values().next().value as string|undefined;
@@ -33,7 +34,7 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
   function view(sessionId:string,socket?:Socket):PlayerState{
     const session=getSession();if(!session||session.id!==sessionId)fail('This session ended or expired. Scan the current game QR code.',404);
     const players=roster(),self=players.find(p=>p.id===socket?.data.playerId)||null;
-    return {sessionId:session.id,title:session.game.title,paused:session.paused,joiningOpen:session.joiningOpen,currentClueId:session.currentClueId,revealed:session.revealed,buzzer:structuredClone(session.buzzer),players,self,activeTab:Boolean(self&&active(self.id)===socket?.id),finished:session.finished,results:session.results,attempt:scoring.current(),serverNow:now()};
+    return {sessionId:session.id,title:session.game.title,paused:session.paused,joiningOpen:session.joiningOpen,currentClueId:session.currentClueId,revealed:session.revealed,buzzer:structuredClone(session.buzzer),players,self,activeTab:Boolean(self&&active(self.id)===socket?.id),finished:session.finished,results:session.results,attempt:scoring.current(),serverNow:now(),round:session.round,dailyDouble:session.dailyDouble?{clueId:session.dailyDouble.clueId,playerId:session.dailyDouble.playerId,wager:session.dailyDouble.wager,revealed:session.dailyDouble.revealed}:null,final:rounds.publicFinal(),finalOwn:rounds.own(socket?.data.playerId)};
   }
   function publish(){
     const session=getSession();if(!session)return;
@@ -57,7 +58,7 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
   }
   function hostAction(a:HostAction):boolean{
     const session=getSession()!;
-    if(a.type==='joining-open'||a.type==='joining-close')session.joiningOpen=a.type==='joining-open';
+    if(a.type==='joining-open'||a.type==='joining-close'){if(a.type==='joining-open'&&(session.round!=='first'||session.game.categories.flatMap(c=>c.clues).every(q=>session.completed.includes(q.id))))fail('Joining permanently closes when the first board ends.');session.joiningOpen=a.type==='joining-open';}
     else if(a.type==='qr-show'||a.type==='qr-hide')session.showJoinQr=a.type==='qr-show';
     else if(a.type==='join-address'){
       if(!a.origin||!origins().includes(a.origin))fail('Choose one of this MacBook’s current network addresses. Player QR codes cannot use localhost.');
@@ -71,6 +72,7 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
       afterCommit(()=>{for(const id of tabs.get(a.playerId!)||[]){const socket=io.sockets.sockets.get(id);socket?.emit('player:invalid',{error:'The host removed this player. Ask the host before joining again with a new name.'});socket?.disconnect(true);}
       tabs.delete(a.playerId!);});
     }else if(['buzz-open','buzz-close','buzz-clear','buzz-exclude','eligibility-reset'].includes(a.type)){
+      if(session.dailyDouble||session.round==='final')fail('Normal buzzers are disabled for Daily Doubles and Final Jeopardy.');
       if(!session.currentClueId||session.revealed||session.paused||session.finished||session.completed.includes(session.currentClueId))fail('Buzzing requires an open clue with its answer hidden and the session running.');
       const buzzer=session.buzzer;
       if(a.type==='buzz-open'){
@@ -100,6 +102,7 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
     if(parsed.windowId!==buzzer.windowId)fail('That buzzer window expired. Wait for the host to open buzzing again.',409);
     if(buzzer.attemptedIds.includes(player.id))fail('This player already buzzed in this window.',409);
     if(buzzer.excludedIds.includes(player.id))fail('You are ineligible for this clue.',403);
+    if(session.dailyDouble||session.round==='final')fail('Normal buzzers are disabled for this special clue.');
     if(!session.currentClueId||session.paused||session.revealed||session.finished||session.completed.includes(session.currentClueId)||!buzzer.open||buzzer.winnerId)fail('Buzzing is closed. Early taps are never queued.',409);
     // Synchronous SQLite transaction + one event loop = exactly one accepted winner.
     transaction(()=>{buzzer.attemptedIds.push(player.id);buzzer.winnerId=player.id;buzzer.open=false;scoring.accept(player.id);session.revision++;});
@@ -107,6 +110,11 @@ export function playerService(store:ReturnType<typeof openStore>,io:Server,getSe
   }
   function register(socket:Socket){
     const id=socket.data.playerId;const set=tabs.get(id)||new Set<string>();set.add(socket.id);tabs.set(id,set);broadcast();
+    socket.on('player:final',(input,ack)=>{
+      if(typeof ack!=='function')return;
+      try{authenticate(socket.data.sessionId,socket.handshake.auth.token);if(active(id)!==socket.id)fail('Use the active player tab to submit.',403);rounds.tick();rounds.submit(id,input);ack({ok:true});}
+      catch(error){if(getSession()?.id===socket.data.sessionId)socket.emit('player:state',view(socket.data.sessionId,socket));ack({ok:false,error:error instanceof Error?error.message:'Submission rejected.'});}
+    });
     socket.on('player:buzz',(input,ack)=>{
       if(typeof ack!=='function')return;
       try{buzz(socket,input);ack({ok:true});}
